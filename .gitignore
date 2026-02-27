@@ -1,2 +1,4 @@
 .env
 data/am_benchmark.csv
+demagog_wypowiedzi_general.json
+demagog_wypowiedzi_detailed.json
