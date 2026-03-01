@@ -1,9 +1,17 @@
 import time
 import json
+import sys
 import cloudscraper
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone
 
+# Reconfigure stdout for UTF-8 on Windows (prevents UnicodeEncodeError
+# when printing emoji/special chars in cmd.exe / PowerShell)
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+from datetime import datetime, timezone
 BASE = "https://demagog.org.pl"
 
 session = cloudscraper.create_scraper()

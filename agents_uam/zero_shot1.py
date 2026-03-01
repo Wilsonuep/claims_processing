@@ -6,22 +6,22 @@ load_dotenv()
 
 """
 Najbardziej podstawowa wersja agenta
-Z dostępem do web_search (Together AI)
-Do benchmarku z Demagoga
+Brak narzędzi
+Do benchmarku z UAMu
 Wykorzystuje Together AI API z modelem openai/gpt-oss-20b
 """
 
 client = Together(api_key=os.getenv("together_api_key"))
+model = "openai/gpt-oss-20b"
 
 AGENT_CONFIG = {
-    "name": "dem_ga2",
-    "model": "openai/gpt-oss-20b",
-    "system_prompt": """Jesteś agentem który ma za zadanie ocenić prawdziwość wypowiedzi polityka z wykorzystaniem narzędzi.
-    Input: Wypowiedź polityka której prawdziwość masz ocenić.
-    Instructions: Dokonaj oceny prawdziwości wypowiedzi polityka. 
-    Wykorzystujesz dostępne narzędzia do wyszukiwania informacji.
-    Output: Prawda, Fałsz, Manipulacja, Brak danych""",
-    "tools": ["web_search"],
+    "name": "uam_ga1",
+    "model": model,
+    "system_prompt": """Jesteś agentem który ma za zadanie ocenić prawdziwość wypowiedzi bez wykorzystania jakichkolwiek narzędzi.
+    Input: Wypowiedź/pytanie którego prawdziwość masz ocenić wraz z 4 opcjami do wyboru
+    Instructions: Dokonaj oceny prawdziwości wypowiedzi/pytania i wybierz najbardziej odpowiednią opcję. Nie wykorzystujesz żadnych narzędzi i masz polegać tylko na swojej wiedzy ogólnej.
+    Output: 0, 1, 2 or 3""",
+    "tools": [],  # brak narzędzi
 }
 
 

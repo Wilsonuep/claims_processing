@@ -13,18 +13,28 @@ Użycie:
     python eval/uam_benchmark_loop.py --agent ga2 --limit 10
 """
 
+import ast
 import os
 import sys
 import argparse
 import csv
 import time
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
 from together import Together
 
 load_dotenv()
+
+# Reconfigure stdout for UTF-8 on Windows (prevents UnicodeEncodeError
+# when printing emoji like '⚠' in cmd.exe / PowerShell)
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Konfiguracja API
@@ -75,8 +85,8 @@ def format_question(row: pd.Series) -> str:
 
     # Odpowiedzi są zapisane jako string w formacie listy Pythona
     try:
-        answers = eval(answers_raw)
-    except Exception:
+        answers = ast.literal_eval(answers_raw)
+    except (ValueError, SyntaxError):
         answers = [answers_raw]
 
     # Budowanie promptu z pytaniem i opcjami
@@ -140,7 +150,7 @@ def main():
     args = parser.parse_args()
 
     # Ładowanie benchmarku
-    benchmark_path = os.path.join(os.path.dirname(__file__), "..", "data", "am_benchmark.csv")
+    benchmark_path = str(Path(__file__).resolve().parent.parent / "data" / "am_benchmark.csv")
     df = pd.read_csv(benchmark_path)
     print(f"Załadowano benchmark: {len(df)} pytań")
     print(f"Model: {MODEL}")
@@ -159,8 +169,8 @@ def main():
         output_path = args.output
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(
-            os.path.dirname(__file__), f"wyniki_{agent_name}_{timestamp}.csv"
+        output_path = str(
+            Path(__file__).resolve().parent / f"wyniki_{agent_name}_{timestamp}.csv"
         )
 
     # Otwarcie pliku wynikowego i start ewaluacji
