@@ -1,28 +1,27 @@
 import os
 from dotenv import load_dotenv
-from together import Together
+
+from gen_agent.llm_client import client, MODEL
 
 load_dotenv()
 
 """
 Najbardziej podstawowa wersja agenta
-Z dostępem do web_search (Together AI)
-Wykorzystywany do benchmarku z UAMu
+Brak narzędzi
+Do benchmarku z UAMu
 Wykorzystuje Together AI API z modelem openai/gpt-oss-20b
 """
 
-client = Together(api_key=os.getenv("together_api_key"))
-model = "openai/gpt-oss-20b"
+model = MODEL
 
 AGENT_CONFIG = {
-    "name": "uam_ga2",
+    "name": "uam_ga1",
     "model": model,
-    "system_prompt": """Jesteś agentem który ma za zadanie ocenić prawdziwość wypowiedzi z wykorzystaniem narzędzi.
+    "system_prompt": """Jesteś agentem który ma za zadanie ocenić prawdziwość wypowiedzi bez wykorzystania jakichkolwiek narzędzi.
     Input: Wypowiedź/pytanie którego prawdziwość masz ocenić wraz z 4 opcjami do wyboru
-    Instructions: Dokonaj oceny prawdziwości wypowiedzi/pytania i wybierz najbardziej odpowiednią opcję. 
-    Wykorzystujesz dostępne narzędzia do wyszukiwania informacji.
+    Instructions: Dokonaj oceny prawdziwości wypowiedzi/pytania i wybierz najbardziej odpowiednią opcję. Nie wykorzystujesz żadnych narzędzi i masz polegać tylko na swojej wiedzy ogólnej.
     Output: 0, 1, 2 or 3""",
-    "tools": ["web_search"],  # Together AI web search
+    "tools": [],  # brak narzędzi
 }
 
 

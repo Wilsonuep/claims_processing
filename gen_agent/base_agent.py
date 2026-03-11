@@ -7,7 +7,7 @@ po ``BaseAgent`` i zaimplementować metodę ``eval()``.
 
 Użycie
 ------
-    from eval.base_agent import BaseAgent
+    from gen_agent.base_agent import BaseAgent
 
     class MojAgent(BaseAgent):
         name = "moj_agent"
