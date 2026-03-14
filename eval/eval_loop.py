@@ -86,21 +86,21 @@ RESULTS_DIR = "results"
 
 # Agents with ≤1 LLM calls per claim — run on full dataset
 TIER1_AGENTS: frozenset[str] = frozenset({
-    "uam_ga1",   # single (1 call)
-    "uam_ga2",   # single_web (1 call)
-    "uam_ga3",   # single_bm25 (1 call)
+    "uam_ga1", "dem_ga1",  # single (1 call)
+    "uam_ga2", "dem_ga2",  # single_web (1 call)
+    "uam_ga3", "dem_ga3",  # single_bm25 (1 call)
 })
 
 # Agents with 2 LLM calls per claim — moderate cost
 TIER2_AGENTS: frozenset[str] = frozenset({
-    "uam_ga4",   # rag_claim_decomp (2 calls)
-    "uam_ga5",   # bm25_claim_decomp (2 calls)
+    "uam_ga4", "dem_ga4",  # rag_claim_decomp (2 calls)
+    "uam_ga5", "dem_ga5",  # bm25_claim_decomp (2 calls)
 })
 
 # Agents with 4+ LLM calls per claim — expensive
 TIER3_AGENTS: frozenset[str] = frozenset({
-    "uam_ga6",         # fewshot_cot_rag (4-5 calls)
-    "uam_ga_debate",   # debate pipeline (7-8 calls)
+    "uam_ga6", "dem_ga6",            # fewshot_cot_rag (4-5 calls)
+    "uam_ga_debate", "uam_ga7", "dem_ga7",  # debate pipeline (7-8 calls)
 })
 
 # Default limits for local mode
@@ -481,9 +481,12 @@ def eval_benchmark(
         log.info("  Twierdzenia:  %d", total_claims)
         log.info("  Poprawne:     %d (%.1f%%)", correct_count,
                  correct_count / max(total_claims, 1) * 100)
+        avg_time = total_time_sum / max(total_claims, 1)
+        tps = total_tokens_sum / max(total_time_sum, 0.1)
         log.info("  Błędy:        %d", error_count)
         log.info("  Tokeny łącz.: %d", total_tokens_sum)
         log.info("  Czas łącz.:   %.1f s", total_time_sum)
+        log.info("  Śr. czas/claim: %.2f s (przepustowość: %.1f tok/s)", avg_time, tps)
         log.info("═" * 60)
 
     # --- Zamknięcie połączeń ---
@@ -653,10 +656,13 @@ def eval_benchmark_cloud(
         log.info("  Twierdzenia:  %d", total_claims)
         log.info("  Poprawne:     %d (%.1f%%)", correct_count,
                  correct_count / max(total_claims, 1) * 100)
+        avg_time = total_time_sum / max(total_claims, 1)
+        tps = total_tokens_sum / max(total_time_sum, 0.1)
         log.info("  Błędy:        %d", error_count)
         log.info("  Tokeny łącz.: %d", total_tokens_sum)
         log.info("  Wall-clock:   %.1f s (%.1f claims/s)",
                  agent_elapsed, total_claims / max(agent_elapsed, 0.1))
+        log.info("  Śr. czas/claim: %.2f s (przepustowość: %.1f tok/s)", avg_time, tps)
         log.info("═" * 60)
 
     input_conn.close()
@@ -842,9 +848,12 @@ def eval_benchmark_local(
             log.info("  Twierdzenia:  %d / %d", total_claims, total_available)
             log.info("  Poprawne:     %d (%.1f%%)", correct_count,
                      correct_count / max(total_claims, 1) * 100)
+            avg_time = total_time_sum / max(total_claims, 1)
+            tps = total_tokens_sum / max(total_time_sum, 0.1)
             log.info("  Błędy:        %d", error_count)
             log.info("  Tokeny łącz.: %d", total_tokens_sum)
             log.info("  Czas łącz.:   %.1f s", total_time_sum)
+            log.info("  Śr. czas/claim: %.2f s (przepustowość: %.1f tok/s)", avg_time, tps)
             log.info("═" * 60)
 
     input_conn.close()

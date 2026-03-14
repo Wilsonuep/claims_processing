@@ -48,6 +48,7 @@ REQUIREMENTS: list[str] = [
     # --- Web scraping ---
     "cloudscraper",
     "beautifulsoup4",
+    "duckduckgo-search",
     # --- ML / Embeddings ---
     "sentence-transformers",
     "tqdm",

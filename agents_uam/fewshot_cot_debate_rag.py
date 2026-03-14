@@ -543,7 +543,7 @@ def judge_debate(
 # ═══════════════════════════════════════════════════════════════════════════
 
 AGENT_CONFIG = {
-    "name": "uam_ga_debate",
+    "name": "uam_ga_7",
     "model": "openai/gpt-oss-20b",
     "system_prompt": "Debate CoT: Decomposer → RAG → Proponent vs Opponent → Judge",
     "tools": ["rag_two_stage", "claim_decomposition", "adversarial_debate"],

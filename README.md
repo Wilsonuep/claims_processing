@@ -17,7 +17,8 @@ claims_processing/
 │   ├── base_agent.py            #     Abstract BaseAgent class (agent interface)
 │   ├── llm_client.py            #     Universal LLM client factory (Together/Ollama/vLLM/llama.cpp)
 │   ├── bm25.py                  #     Generic BM25 retriever (inverted index, memory-optimized)
-│   └── rag.py                   #     RAG retriever (BM25 / vector / hybrid + RRF fusion)
+│   ├── rag.py                   #     RAG retriever (BM25 / vector / hybrid + RRF fusion)
+│   └── react.py                 #     Universal ReAct loop & tool parsing
 │
 ├── datascrap/                   # 🕸  Web scrapers (data acquisition)
 │   ├── demagog_webscrapper.py   #     Scrapes listing pages from Demagog.pl
@@ -25,6 +26,7 @@ claims_processing/
 │   └── polish_wikipedia_webscrapper.py # Scrapes Polish Wikipedia articles via API
 │
 ├── dataprep/                    # 🔧  Data processing & storage
+│   ├── build_wikipedia_db.py    #     Ingests scraped Wikipedia JSON → chunks & vector DB
 │   ├── wikipeda_chunking.py     #     Splits Wikipedia articles → sentence-level chunks
 │   ├── wikipedia_embedding.py   #     Embeds chunks with sentence-transformers
 │   ├── wikipedia_db.py          #     SQLite + sqlite-vec vector DB for RAG
@@ -38,9 +40,16 @@ claims_processing/
 │   ├── rag_claim_decomp.py      #     uam_ga4 — Claim decomposition + RAG retrieval
 │   ├── bm25_claim_decomp.py     #     uam_ga5 — Claim decomposition + BM25 retrieval
 │   ├── fewshot_cot_rag.py       #     uam_ga6 — Few-shot CoT + multi-voter + RAG + provenance
-│   └── fewshot_cot_debate_rag.py #    uam_ga_debate — Adversarial debate + RAG + judge
+│   └── fewshot_cot_debate_rag.py #    uam_ga7 — Adversarial debate + RAG + judge
 │
-├── agents_dem/                  # 🤖  (reserved) Demagog-specific agents
+├── agents_dem/                  # 🤖  Demagog-specific agents
+│   ├── single.py                #     dem_ga1 — Zero-shot agent
+│   ├── single_web.py            #     dem_ga2 — ReAct agent with web search
+│   ├── single_bm25.py           #     dem_ga3 — Open-book agent (BM25)
+│   ├── rag_claim_decomp.py      #     dem_ga4 — Claim decomp + RAG
+│   ├── bm25_claim_decomp.py     #     dem_ga5 — Claim decomp + BM25
+│   ├── fewshot_cot_rag.py       #     dem_ga6 — Few-shot CoT + multi-voter
+│   └── fewshot_cot_debate_rag.py #    dem_ga7 — Adversarial debate
 │
 ├── eval/                        # 📊  Evaluation & benchmarking
 │   └── eval_loop.py             #     Generic evaluation loop (cloud/local modes, tiered scheduling)
@@ -57,6 +66,9 @@ claims_processing/
 ├── results/                     # 📈  Evaluation results (auto-created)
 │   ├── results_demagog.db       #     Results DB for Demagog benchmark
 │   └── results_am_benchmark.db  #     Results DB for AM benchmark
+│
+├── tests/                       # 🧪  Integration tests
+│   └── tester.py                #     Main test runner (DB creation, benchmark, pipeline)
 │
 └── data/                        # 📁  Raw / downloaded datasets
     └── am_benchmark_loader.py   #     Downloads AM benchmark from HuggingFace Hub
@@ -114,6 +126,9 @@ Create a `.env` file in the project root:
 # Cloud (Together.ai):
 together_api_key=your_together_ai_key_here
 
+# Paths to databases (required for RAG and BM25 tests):
+BM25_WIKI_DB=dataprep/wiki.db
+
 # Local (Ollama — optional, see "Local Models" section below):
 # LLM_BACKEND=ollama
 # LLM_MODEL=hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M
@@ -136,11 +151,14 @@ python datascrap/polish_wikipedia_webscrapper.py
 python data/am_benchmark_loader.py
 
 # --- Step 2: Prepare databases ---
+# Build Wikipedia vector DB (from scraped JSON)
+python dataprep/build_wikipedia_db.py --input polish_wikipedia_articles.json
+
 # Ingest Demagog fact-checks into SQLite
-python dataprep/demagog_db.py --json data/demagog_wypowiedzi_detailed.json
+python dataprep/demagog_db.py --input data/demagog_wypowiedzi_detailed.json
 
 # Ingest AM benchmark into SQLite
-python dataprep/am_benchmark_db.py --csv data/am_benchmark.csv
+python dataprep/am_benchmark_db.py --input data/am_benchmark.csv
 
 # --- Step 3: Evaluate agents ---
 # Cloud mode (Together.ai, parallel):
@@ -150,21 +168,30 @@ python -m eval.eval_loop --mode cloud --workers 10
 python -m eval.eval_loop --mode local
 ```
 
+### 5. Run Integration Tests
+
+You can optionally verify the integrity of chunking processes, RAG setups, databases, and evaluation pipelines using the included testing interface.
+```bash
+python tests/tester.py
+```
+
 ---
 
 ## Agents
 
-All agents live in `agents_uam/` and implement the `BaseAgent` interface from `gen_agent/base_agent.py`.
+All agents live in `agents_uam/` and `agents_dem/` and implement the `BaseAgent` interface from `gen_agent/base_agent.py`.
 
 | Agent ID | File | Strategy | LLM calls/claim | Tools |
 |----------|------|----------|:---:|-------|
-| `uam_ga1` | `single.py` | Zero-shot (no tools) | 1 | — |
-| `uam_ga2` | `single_web.py` | Zero-shot + web search | 1 | `web_search` |
-| `uam_ga3` | `single_bm25.py` | Open-book BM25 Wikipedia | 1 | `bm25_wikipedia` |
-| `uam_ga4` | `rag_claim_decomp.py` | Claim decomposition + RAG | 2 | `rag_hybrid`, `claim_decomposition` |
-| `uam_ga5` | `bm25_claim_decomp.py` | Claim decomposition + BM25 | 2 | `bm25_wikipedia`, `claim_decomposition` |
-| `uam_ga6` | `fewshot_cot_rag.py` | Few-shot CoT, 3 reasoners + consolidator + RAG | 4–5 | `rag_two_stage`, `claim_decomposition` |
-| `uam_ga_debate` | `fewshot_cot_debate_rag.py` | Adversarial debate (proponent vs opponent) + judge | 7–8 | `rag_two_stage`, `adversarial_debate` |
+| `uam_ga1`, `dem_ga1` | `single.py` | Zero-shot (no tools) | 1 | — |
+| `uam_ga2`, `dem_ga2` | `single_web.py` | ReAct Zero-shot + web search | 1–5 | `web_search` |
+| `uam_ga3`, `dem_ga3` | `single_bm25.py` | Open-book BM25 Wikipedia | 1 | `bm25_wikipedia` |
+| `uam_ga4`, `dem_ga4` | `rag_claim_decomp.py` | Claim decomposition + RAG | 2 | `rag_hybrid`, `claim_decomposition` |
+| `uam_ga5`, `dem_ga5` | `bm25_claim_decomp.py` | Claim decomposition + BM25 | 2 | `bm25_wikipedia`, `claim_decomposition` |
+| `uam_ga6`, `dem_ga6` | `fewshot_cot_rag.py` | Few-shot CoT, 3 reasoners + consolidator + RAG | 4–5 | `rag_two_stage`, `claim_decomposition` |
+| `uam_ga7`, `dem_ga7` | `fewshot_cot_debate_rag.py` | Adversarial debate (proponent vs opponent) + judge | 7–8 | `rag_two_stage`, `adversarial_debate` |
+
+*Note: Models utilizing dynamic tools (e.g., `web_search`) leverage a standardized ReAct loop from `gen_agent/react.py`. This ensures they reliably use external API tools with high determinism without strictly depending on native tool-calling supports inside some of local open-models.*
 
 ---
 
@@ -178,6 +205,7 @@ Common utilities shared by all agents, extracted into a reusable package:
 | `llm_client.py` | Universal LLM client factory — switches between Together.ai, Ollama, vLLM, and llama.cpp via `LLM_BACKEND` env var |
 | `bm25.py` | Generic BM25 (Okapi) retriever with inverted index, memory-optimized for 1.5M+ chunks |
 | `rag.py` | RAG retriever supporting BM25, vector (sqlite-vec k-NN), and hybrid (RRF fusion) modes; two-stage retrieval with structured evidence provenance |
+| `react.py` | Universal ReAct agent loop for robust and model-agnostic tool calling |
 
 ---
 
@@ -229,7 +257,7 @@ python -m eval.eval_loop --benchmarks demagog --clear   # clear old results firs
 |------|--------|:---:|:---:|
 | Tier 1 (fast) | `uam_ga1`, `uam_ga2`, `uam_ga3` | all | 1 |
 | Tier 2 (moderate) | `uam_ga4`, `uam_ga5` | 2000 | 2 |
-| Tier 3 (expensive) | `uam_ga6`, `uam_ga_debate` | 500 | 4–8 |
+| Tier 3 (expensive) | `uam_ga6`, `uam_ga7` | 500 | 4–8 |
 
 ### Results
 
@@ -353,6 +381,9 @@ Example `.env` configurations:
 # Together.ai (cloud):
 LLM_BACKEND=together
 together_api_key=your_key
+
+# Database paths (required for RAG agents):
+BM25_WIKI_DB=dataprep/wiki.db
 
 # Ollama (local, Bielik):
 LLM_BACKEND=ollama

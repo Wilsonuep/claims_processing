@@ -55,7 +55,7 @@ try:
 except ImportError:
     import sqlite3
 
-from wikipeda_chunking import Chunk
+from dataprep.wikipeda_chunking import Chunk
 
 # ---------------------------------------------------------------------------
 # Konfiguracja logowania
