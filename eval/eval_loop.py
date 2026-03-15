@@ -301,6 +301,27 @@ def insert_result(
     )
 
 
+def get_evaluated_claim_ids(
+    conn: sqlite3.Connection, agent_name: str, benchmark_name: str
+) -> set[int]:
+    """Zwraca zbiór ID twierdzeń już przetworzonych przez agenta.
+    Ewentualne błędy (model_label = 'ERROR') są usuwane by spróbować ponownie.
+    """
+    conn.execute(
+        "DELETE FROM agent_results WHERE agent_name = ? AND benchmark_name = ? AND model_label = 'ERROR'",
+        (agent_name, benchmark_name),
+    )
+    conn.commit()
+
+    query = '''
+        SELECT claim_id FROM agent_results
+        WHERE agent_name = ? AND benchmark_name = ?
+    '''
+    rows = conn.execute(query, (agent_name, benchmark_name)).fetchall()
+    return {row[0] for row in rows}
+
+
+
 # ---------------------------------------------------------------------------
 # Ewaluacja pojedynczego agenta na jednym twierdzeniu
 # ---------------------------------------------------------------------------
@@ -409,12 +430,22 @@ def eval_benchmark(
         log.info("Agent: %s", agent.name)
         log.info("─" * 40)
 
+        evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name)
+        pending_rows = [row for row in rows if row["id"] not in evaluated_ids]
+
+        if not pending_rows:
+            log.info("Agent %s przetworzył wszystkie przypisane twierdzenia. Pomijam.", agent.name)
+            continue
+
+        log.info("Do przetworzenia: %d (gotowych: %d)", len(pending_rows), len(evaluated_ids))
+        total_claims = len(pending_rows)
+
         correct_count = 0
         error_count = 0
         total_tokens_sum = 0
         total_time_sum = 0.0
 
-        for idx, row in enumerate(rows, start=1):
+        for idx, row in enumerate(pending_rows, start=1):
             claim = row_to_claim_dict(row)
             claim_id = claim["id"]
             claim_text_preview = (claim.get("claim_text") or "")[:80]
@@ -598,6 +629,16 @@ def eval_benchmark_cloud(
         log.info("Agent: %s (cloud, %d workers)", agent.name, workers)
         log.info("─" * 40)
 
+        evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name)
+        pending_claims = [c for c in claims if c["id"] not in evaluated_ids]
+
+        if not pending_claims:
+            log.info("Agent %s przetworzył wszystkie przypisane twierdzenia. Pomijam.", agent.name)
+            continue
+
+        log.info("Do przetworzenia: %d (gotowych: %d)", len(pending_claims), len(evaluated_ids))
+        total_claims = len(pending_claims)
+
         correct_count = 0
         error_count = 0
         total_tokens_sum = 0
@@ -610,7 +651,7 @@ def eval_benchmark_cloud(
                 executor.submit(
                     _eval_claim_thread, agent, claim, idx, total_claims,
                 ): idx
-                for idx, claim in enumerate(claims, start=1)
+                for idx, claim in enumerate(pending_claims, start=1)
             }
 
             for future in as_completed(futures):
@@ -781,16 +822,28 @@ def eval_benchmark_local(
         for agent in tier_agents:
             log.info("─" * 40)
             log.info(
-                "Agent: %s (tier %d, %d claims)", agent.name, tier_num, total_claims,
+                "Agent: %s (tier %d, %d max claims)", agent.name, tier_num, total_claims,
             )
             log.info("─" * 40)
+
+            evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name)
+            pending_rows = [row for row in rows if row["id"] not in evaluated_ids]
+
+            if not pending_rows:
+                log.info("Agent %s przetworzył wszystkie przypisane twierdzenia. Pomijam.", agent.name)
+                continue
+
+            log.info("Do przetworzenia: %d (gotowych: %d)", len(pending_rows), len(evaluated_ids))
+            
+            # Use inner variable to shadow total_claims to avoid leaking to next agent
+            total_claims_inner = len(pending_rows)
 
             correct_count = 0
             error_count = 0
             total_tokens_sum = 0
             total_time_sum = 0.0
 
-            for idx, row in enumerate(rows, start=1):
+            for idx, row in enumerate(pending_rows, start=1):
                 claim = row_to_claim_dict(row)
                 claim_id = claim["id"]
                 claim_text_preview = (claim.get("claim_text") or "")[:80]
@@ -801,7 +854,7 @@ def eval_benchmark_local(
                     error_count += 1
                     log.error(
                         "[%d/%d] BŁĄD — claim_id=%s agent=%s: %s",
-                        idx, total_claims, claim_id, agent.name, exc,
+                        idx, total_claims_inner, claim_id, agent.name, exc,
                     )
                     error_result: dict[str, Any] = {
                         "model_label": "ERROR",
@@ -834,7 +887,7 @@ def eval_benchmark_local(
                 log.info(
                     "[%d/%d] claim_id=%-6s | poprawna=%-5s | "
                     "tokeny=%d | czas=%.2fs | trafność=%.1f%% | %s…",
-                    idx, total_claims, claim_id,
+                    idx, total_claims_inner, claim_id,
                     "TAK" if result["is_correct"] else "NIE",
                     int(result["total_tokens"]),
                     float(result["time_thought"]),
@@ -845,10 +898,10 @@ def eval_benchmark_local(
             # Agent summary
             log.info("═" * 60)
             log.info("Agent: %s — podsumowanie (tier %d)", agent.name, tier_num)
-            log.info("  Twierdzenia:  %d / %d", total_claims, total_available)
+            log.info("  Twierdzenia:  %d / %d", total_claims_inner, total_available)
             log.info("  Poprawne:     %d (%.1f%%)", correct_count,
-                     correct_count / max(total_claims, 1) * 100)
-            avg_time = total_time_sum / max(total_claims, 1)
+                     correct_count / max(total_claims_inner, 1) * 100)
+            avg_time = total_time_sum / max(total_claims_inner, 1)
             tps = total_tokens_sum / max(total_time_sum, 0.1)
             log.info("  Błędy:        %d", error_count)
             log.info("  Tokeny łącz.: %d", total_tokens_sum)

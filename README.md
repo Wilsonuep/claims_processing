@@ -184,7 +184,7 @@ All agents live in `agents_uam/` and `agents_dem/` and implement the `BaseAgent`
 | Agent ID | File | Strategy | LLM calls/claim | Tools |
 |----------|------|----------|:---:|-------|
 | `uam_ga1`, `dem_ga1` | `single.py` | Zero-shot (no tools) | 1 | — |
-| `uam_ga2`, `dem_ga2` | `single_web.py` | ReAct Zero-shot + web search | 1–5 | `web_search` |
+| `uam_ga2`, `dem_ga2` | `single_web.py` | ReAct Zero-shot + web search | 1 | `web_search` |
 | `uam_ga3`, `dem_ga3` | `single_bm25.py` | Open-book BM25 Wikipedia | 1 | `bm25_wikipedia` |
 | `uam_ga4`, `dem_ga4` | `rag_claim_decomp.py` | Claim decomposition + RAG | 2 | `rag_hybrid`, `claim_decomposition` |
 | `uam_ga5`, `dem_ga5` | `bm25_claim_decomp.py` | Claim decomposition + BM25 | 2 | `bm25_wikipedia`, `claim_decomposition` |
@@ -255,9 +255,9 @@ python -m eval.eval_loop --benchmarks demagog --clear   # clear old results firs
 
 | Tier | Agents | Default limit | LLM calls/claim |
 |------|--------|:---:|:---:|
-| Tier 1 (fast) | `uam_ga1`, `uam_ga2`, `uam_ga3` | all | 1 |
-| Tier 2 (moderate) | `uam_ga4`, `uam_ga5` | 2000 | 2 |
-| Tier 3 (expensive) | `uam_ga6`, `uam_ga7` | 500 | 4–8 |
+| Tier 1 (fast) | `uam_ga1`, `dem_ga1`, `uam_ga2`, `dem_ga2`, `uam_ga3`, `dem_ga3` | all | 1 |
+| Tier 2 (moderate) | `uam_ga4`, `dem_ga4`, `uam_ga5`, `dem_ga5` | 2000 | 2 |
+| Tier 3 (expensive) | `uam_ga6`, `dem_ga6`, `uam_ga7`, `dem_ga7` | 500 | 4–8 |
 
 ### Results
 
@@ -285,7 +285,57 @@ Each results DB contains an `agent_results` table with columns:
 | `raw_output` | TEXT | Full agent response |
 | `created_at` | TEXT | ISO timestamp |
 
-Results are **appended** by default (use `--clear` to reset).
+Results are **appended** by default.
+
+### Resume & Crash Recovery
+
+The evaluation pipeline includes automatic crash recovery out of the box. If a run is interrupted (e.g., due to an API timeout, crash, or manual stop), you can simply re-run the exact same command. The script will automatically scan the existing `results_*.db` databases to determine which claims were already successfully evaluated by which agents, and will **skip** them, only processing the remaining ones.
+
+*Note: Use the `--clear` flag if you intentionally want to restart the evaluation from scratch.*
+
+### Advanced Workflow: Distributed Evaluation
+
+You can split the evaluation load across multiple machines to speed up the process. This is particularly useful when you want to run computationally expensive models (like local open source models or complex debate agents) on a dedicated GPU machine, while running lighter API-based models on another.
+
+**Step 1: Partition the evaluation**
+Run a subset of lighter models on **Machine A**:
+```bash
+python -m eval.eval_loop --mode cloud --agents uam_ga1,dem_ga1
+```
+
+Run the heavy/expensive models on **Machine B**:
+```bash
+python -m eval.eval_loop --mode local --agents uam_ga6,dem_ga6
+```
+
+**Step 2: Transfer results for analysis**
+Once both are finished, copy the resulting SQLite database from Machine B to Machine A (or your local analysis machine). You can do this securely via `scp` or `rsync`:
+```bash
+scp user@machine-b:/path/to/claims_processing/results/results_demagog.db ./results/machine_b_results.db
+```
+
+**Step 3: Merge databases**
+Use the provided `merge_results` utility to clean and unify both databases into one ready for analysis on a single machine. The script automatically handles and ignores duplicates:
+```bash
+python -m scripts.merge_results \
+    --target results/merged_eval.db \
+    --sources results/results_demagog.db results/machine_b_results.db
+```
+
+**Step 4: Analysis**
+You can now open `results/merged_eval.db` with your preferred SQLite client (e.g., DBeaver, DB Browser for SQLite) or connect to it via Pandas/Jupyter Notebook to analyze the combined metrics (`accuracy`, `total_tokens`, `time_thought`) of all agents in one place.
+
+### Checking Evaluation Completeness
+
+To verify if all registered agents have fully evaluated all underlying claims in the datasets, you can use the completeness test script:
+```bash
+# Check status against the standard databases
+python tests/eval_completeness_test.py
+
+# Or check a merged database from distributed evaluation
+python tests/eval_completeness_test.py --results-db results/merged_eval.db
+```
+The script will dynamically discover agents and output a clear tabular report displaying how many claims are completed, pointing out any unfinished runs.
 
 ### Creating a custom agent
 
