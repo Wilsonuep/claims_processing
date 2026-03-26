@@ -43,6 +43,7 @@ REQUIREMENTS: list[str] = [
     # --- API & CLI ---
     "together",
     "python-dotenv",
+    "requests",
     # --- Data ---
     "pandas",
     # --- Web scraping ---

@@ -29,6 +29,28 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Monitoring integration (lazy — no side-effects on import)
+# ---------------------------------------------------------------------------
+
+_monitoring = None  # type: ignore[assignment]
+
+
+def _get_monitoring():
+    global _monitoring
+    if _monitoring is None:
+        try:
+            from monitoring.monitor import MonitoringAgent
+            _monitoring = MonitoringAgent()
+        except Exception:
+            class _NoOp:
+                def start(self): return self
+                def stop(self): pass
+                def report_crash(self, *_, **__): pass
+                def update(self, **_): pass
+            _monitoring = _NoOp()
+    return _monitoring
+
 
 def parse_article_text(text: str) -> list[Section]:
     """
@@ -79,6 +101,16 @@ def main():
     
     args = parser.parse_args()
 
+    mon = _get_monitoring()
+    mon.start()
+    try:
+        _run(args, mon)
+    finally:
+        mon.stop()
+
+
+def _run(args, mon) -> None:
+    """Core pipeline logic, separated from main() for clean monitoring wrap."""
     # Sprawdzenie, czy istnieje plik wejściowy
     input_path = Path(args.input)
     if not input_path.exists():
@@ -114,6 +146,7 @@ def main():
     try:
         chunks = build_wiki_chunks(structured_articles)
     except Exception as e:
+        mon.report_crash(e, context="build_wikipedia_db/build_wiki_chunks")
         log.error(f"Błąd podczas cięcia artykułów (chunking): {e}")
         sys.exit(1)
         
@@ -128,6 +161,7 @@ def main():
     try:
         embed_model = load_model(args.embed_model)
     except Exception as e:
+        mon.report_crash(e, context="build_wikipedia_db/load_model")
         log.error(f"Nie udało się załadować modelu {args.embed_model}: {e}")
         sys.exit(1)
     
@@ -150,6 +184,7 @@ def main():
     try:
         conn = init_db(str(args.db), embedding_dim=embed_dim)
     except Exception as e:
+        mon.report_crash(e, context="build_wikipedia_db/init_db")
         log.error(f"Nie udało się zainicjalizować bazy SQLite-vec: {e}")
         sys.exit(1)
 
@@ -159,6 +194,7 @@ def main():
     try:
         insert_chunks_with_embeddings(conn, chunks, embed_fn, batch_size=args.batch_size)
     except Exception as e:
+        mon.report_crash(e, context="build_wikipedia_db/insert_chunks_with_embeddings")
         log.error(f"Nie powiodła się próba zapisu bazy danych: {e}")
         conn.close()
         sys.exit(1)

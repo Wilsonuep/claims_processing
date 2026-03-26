@@ -51,6 +51,31 @@ import numpy as np
 from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
+# Monitoring integration (lazy — only instantiated when the module is run
+# as a script, never when imported by other modules)
+# ---------------------------------------------------------------------------
+
+_monitoring = None  # type: ignore[assignment]
+
+
+def _get_monitoring():
+    """Return the module-level MonitoringAgent singleton (lazy init)."""
+    global _monitoring
+    if _monitoring is None:
+        try:
+            from monitoring.monitor import MonitoringAgent
+            _monitoring = MonitoringAgent()
+        except Exception:
+            # Monitoring import failed — return a no-op stub
+            class _NoOp:
+                def start(self): return self
+                def stop(self): pass
+                def update(self, **_): pass
+                def report_crash(self, *_, **__): pass
+            _monitoring = _NoOp()
+    return _monitoring
+
+# ---------------------------------------------------------------------------
 # Konfiguracja logowania
 # ---------------------------------------------------------------------------
 
@@ -259,20 +284,37 @@ def embed_chunks(
 
     texts = [c["text"] for c in chunks]
     total = len(texts)
+    mon = _get_monitoring()
 
     log.info(
         "Rozpoczynam embedding %d chunków  (batch=%d, normalize=%s)",
         total, batch_size, normalize,
     )
 
-    t0 = time.perf_counter()
-    embeddings = model.encode(
-        texts,
-        batch_size=batch_size,
-        show_progress_bar=show_progress,
-        normalize_embeddings=normalize,
-        convert_to_numpy=True,
+    # Notify monitoring: embedding is starting
+    mon.update(
+        agent_name="wikipedia_embedding",
+        benchmark="embedding",
+        done=0,
+        total=total,
+        correct=0,
+        errors=0,
+        tokens=0,
+        elapsed_sec=0.0,
     )
+
+    t0 = time.perf_counter()
+    try:
+        embeddings = model.encode(
+            texts,
+            batch_size=batch_size,
+            show_progress_bar=show_progress,
+            normalize_embeddings=normalize,
+            convert_to_numpy=True,
+        )
+    except Exception as exc:
+        mon.report_crash(exc, context="wikipedia_embedding/embed_chunks/model.encode")
+        raise
     elapsed = time.perf_counter() - t0
 
     speed = total / elapsed if elapsed > 0 else float("inf")
@@ -280,6 +322,18 @@ def embed_chunks(
         "Embedding zakończony: %.1f s  (%.0f chunków/s, "
         "wymiar=%d, dtype=%s)",
         elapsed, speed, embeddings.shape[1], embeddings.dtype,
+    )
+
+    # Notify monitoring: embedding complete
+    mon.update(
+        agent_name="wikipedia_embedding",
+        benchmark="embedding",
+        done=total,
+        total=total,
+        correct=total,
+        errors=0,
+        tokens=0,
+        elapsed_sec=elapsed,
     )
 
     # Dopisz embedding do każdego chunka.
@@ -387,6 +441,8 @@ def run_pipeline(
     normalize : bool
         Czy normalizować wektory.
     """
+    mon = _get_monitoring()
+
     # 1. Wczytaj chunki
     chunks = read_chunks_jsonl(input_path)
     if not chunks:
@@ -397,19 +453,32 @@ def run_pipeline(
     print_time_estimates(len(chunks))
 
     # 3. Załaduj model i oblicz embeddingi
-    model = load_model(model_name, device=device)
-    chunks = embed_chunks(
-        chunks,
-        model=model,
-        batch_size=batch_size,
-        normalize=normalize,
-    )
+    try:
+        model = load_model(model_name, device=device)
+    except Exception as exc:
+        mon.report_crash(exc, context="wikipedia_embedding/run_pipeline/load_model")
+        raise
+
+    try:
+        chunks = embed_chunks(
+            chunks,
+            model=model,
+            batch_size=batch_size,
+            normalize=normalize,
+        )
+    except Exception as exc:
+        mon.report_crash(exc, context="wikipedia_embedding/run_pipeline/embed_chunks")
+        raise
 
     # 4. Zapisz wynik
-    if output_format == "sqlite":
-        write_chunks_sqlite(chunks, output_path)
-    else:
-        write_chunks_jsonl(chunks, output_path)
+    try:
+        if output_format == "sqlite":
+            write_chunks_sqlite(chunks, output_path)
+        else:
+            write_chunks_jsonl(chunks, output_path)
+    except Exception as exc:
+        mon.report_crash(exc, context="wikipedia_embedding/run_pipeline/write_output")
+        raise
 
     log.info("Pipeline zakończony pomyślnie.")
 
@@ -466,15 +535,23 @@ def main() -> None:
         print("Użyj --help aby zobaczyć dostępne opcje.", file=sys.stderr)
         sys.exit(1)
 
-    run_pipeline(
-        input_path=args.input,
-        output_path=args.output,
-        model_name=args.model,
-        batch_size=args.batch_size,
-        device=args.device,
-        output_format=args.format,
-        normalize=not args.no_normalize,
-    )
+    mon = _get_monitoring()
+    mon.start()
+    try:
+        run_pipeline(
+            input_path=args.input,
+            output_path=args.output,
+            model_name=args.model,
+            batch_size=args.batch_size,
+            device=args.device,
+            output_format=args.format,
+            normalize=not args.no_normalize,
+        )
+    except Exception as exc:
+        mon.report_crash(exc, context="wikipedia_embedding/main")
+        raise
+    finally:
+        mon.stop()
 
 
 if __name__ == "__main__":

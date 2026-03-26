@@ -68,6 +68,27 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Monitoring integration (lazy — no side-effects on import)
+# ---------------------------------------------------------------------------
+
+_monitoring = None  # type: ignore[assignment]
+
+
+def _get_monitoring():
+    """Return module-level MonitoringAgent singleton (created on first call)."""
+    global _monitoring
+    if _monitoring is None:
+        try:
+            from monitoring.monitor import MonitoringAgent
+            _monitoring = MonitoringAgent()
+        except Exception:
+            class _NoOp:
+                def update(self, **_): pass
+                def report_crash(self, *_, **__): pass
+            _monitoring = _NoOp()
+    return _monitoring
+
 
 # ---------------------------------------------------------------------------
 # Stałe konfiguracyjne
@@ -246,6 +267,9 @@ def insert_chunks_with_embeddings(
 
     total = len(chunks)
     inserted = 0
+    errors = 0
+    mon = _get_monitoring()
+    t_start = __import__('time').perf_counter()
 
     for batch_start in range(0, total, batch_size):
         batch = chunks[batch_start : batch_start + batch_size]
@@ -277,7 +301,15 @@ def insert_chunks_with_embeddings(
                 row_id = cur.lastrowid
 
                 # 2. Oblicz embedding
-                embedding = embed_fn(chunk.text)
+                try:
+                    embedding = embed_fn(chunk.text)
+                except Exception as exc:
+                    errors += 1
+                    mon.report_crash(
+                        exc,
+                        context=f"wikipedia_db/insert_chunks/embed_fn/chunk={chunk.chunk_id}",
+                    )
+                    raise
 
                 # 3. Wstaw embedding do wiki_chunk_vectors (rowid = wiki_chunks.id)
                 cur.execute(
@@ -290,6 +322,17 @@ def insert_chunks_with_embeddings(
 
             conn.commit()
             inserted += len(batch)
+            elapsed = __import__('time').perf_counter() - t_start
+            mon.update(
+                agent_name="wikipedia_db/insert",
+                benchmark="embedding",
+                done=inserted,
+                total=total,
+                correct=inserted,
+                errors=errors,
+                tokens=0,
+                elapsed_sec=elapsed,
+            )
             log.info(
                 "Wstawiono paczkę: %d/%d chunków (%.0f%%)",
                 inserted, total, inserted / total * 100,

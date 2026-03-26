@@ -48,6 +48,17 @@ from pathlib import Path
 from typing import Any
 
 from gen_agent.base_agent import BaseAgent, validate_result
+from monitoring.monitor import MonitoringAgent
+
+# ---------------------------------------------------------------------------
+# Module-level MonitoringAgent singleton
+# ---------------------------------------------------------------------------
+#
+# Instantiated here (reads .env) so all three eval functions share one agent.
+# Call ``monitoring.start()`` in main() to activate the scheduler thread.
+# You can also import this object from outside to call ``monitoring.update()``.
+
+monitoring: MonitoringAgent = MonitoringAgent()
 
 # ---------------------------------------------------------------------------
 # Konfiguracja logowania
@@ -462,6 +473,10 @@ def eval_benchmark(
                     agent.name,
                     exc,
                 )
+                monitoring.report_crash(
+                    exc,
+                    context=f"eval_benchmark/{agent.name}/{benchmark_name}/claim_id={claim_id}",
+                )
                 # Wstawiamy wiersz z informacją o błędzie
                 error_result: dict[str, Any] = {
                     "model_label": "ERROR",
@@ -490,6 +505,18 @@ def eval_benchmark(
                 correct_count += 1
             total_tokens_sum += int(result["total_tokens"])
             total_time_sum += float(result["time_thought"])
+
+            # Update monitoring state (non-blocking)
+            monitoring.update(
+                agent_name=agent.name,
+                benchmark=benchmark_name,
+                done=idx,
+                total=total_claims,
+                correct=correct_count,
+                errors=error_count,
+                tokens=total_tokens_sum,
+                elapsed_sec=total_time_sum,
+            )
 
             # Postęp
             accuracy_pct = correct_count / idx * 100
@@ -547,6 +574,10 @@ def _eval_claim_thread(
         result = eval_single(agent, claim)
         return claim_idx, claim, result
     except Exception as exc:
+        monitoring.report_crash(
+            exc,
+            context=f"eval_benchmark_cloud/{agent.name}/claim_id={claim.get('id', '?')}",
+        )
         error_result: dict[str, Any] = {
             "model_label": "ERROR",
             "original_label": claim.get("label", ""),
@@ -675,12 +706,22 @@ def eval_benchmark_cloud(
                     total_tokens_sum += int(result["total_tokens"])
                     total_time_sum += float(result["time_thought"])
 
-                # Log progress every 50 claims
+                # Update monitoring + log progress every 50 claims
                 if processed % 50 == 0 or processed == total_claims:
                     accuracy_pct = correct_count / max(processed - error_count, 1) * 100
                     elapsed = time.perf_counter() - t_agent_start
                     claims_per_sec = processed / max(elapsed, 0.1)
                     eta_sec = (total_claims - processed) / max(claims_per_sec, 0.01)
+                    monitoring.update(
+                        agent_name=agent.name,
+                        benchmark=benchmark_name,
+                        done=processed,
+                        total=total_claims,
+                        correct=correct_count,
+                        errors=error_count,
+                        tokens=total_tokens_sum,
+                        elapsed_sec=elapsed,
+                    )
                     log.info(
                         "[%d/%d] agent=%s | trafność=%.1f%% | "
                         "%.1f claims/s | ETA=%.0fs",
@@ -856,6 +897,10 @@ def eval_benchmark_local(
                         "[%d/%d] BŁĄD — claim_id=%s agent=%s: %s",
                         idx, total_claims_inner, claim_id, agent.name, exc,
                     )
+                    monitoring.report_crash(
+                        exc,
+                        context=f"eval_benchmark_local/{agent.name}/{benchmark_name}/claim_id={claim_id}",
+                    )
                     error_result: dict[str, Any] = {
                         "model_label": "ERROR",
                         "original_label": claim.get("label", ""),
@@ -882,6 +927,18 @@ def eval_benchmark_local(
                     correct_count += 1
                 total_tokens_sum += int(result["total_tokens"])
                 total_time_sum += float(result["time_thought"])
+
+                # Update monitoring state (non-blocking)
+                monitoring.update(
+                    agent_name=agent.name,
+                    benchmark=benchmark_name,
+                    done=idx,
+                    total=total_claims_inner,
+                    correct=correct_count,
+                    errors=error_count,
+                    tokens=total_tokens_sum,
+                    elapsed_sec=total_time_sum,
+                )
 
                 accuracy_pct = correct_count / idx * 100
                 log.info(
@@ -949,7 +1006,11 @@ def _resolve_db_paths(
 
 
 def main() -> None:
-    """Punkt wejścia CLI — ewaluuje agentów na benchmarkach."""
+    """Punkt wejścia CLI — ewaluuje agentów na benchmarkach.
+
+    Starts the MonitoringAgent scheduler before evaluation begins
+    and stops it cleanly on exit.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Generyczna pętla ewaluacyjna — ewaluuje agentów "
@@ -1072,6 +1133,9 @@ def main() -> None:
     log.info("Benchmarki: %s", ", ".join(benchmark_names))
     log.info("Tryb: %s", args.mode)
 
+    # --- Start monitoring ---
+    monitoring.start()
+
     # Ewaluacja
     for bname in benchmark_names:
         input_db, results_db = _resolve_db_paths(bname)
@@ -1108,6 +1172,7 @@ def main() -> None:
             )
 
     log.info("Ewaluacja wszystkich benchmarków zakończona.")
+    monitoring.stop()
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ from test_02_demagog_db import test_demagog_db
 from test_03_am_benchmark_db import test_am_benchmark_db
 from test_04_eval_local import test_eval_local
 from test_05_eval_cloud import test_eval_cloud
+from test_06_cuda_gpu import test_cuda_gpu
+from test_07_monitoring import test_monitoring
 
 def run_tests():
     print("=" * 60)
@@ -17,7 +19,9 @@ def run_tests():
         ("Załadunek wyników Demagog JSON do bazy DB", test_demagog_db),
         ("Załadunek AM Benchmark CSV do bazy DB", test_am_benchmark_db),
         ("Evaluacja agentowa (tryb lokalny - tiered)", test_eval_local),
-        ("Evaluacja agentowa (tryb w chmurze - parallel)", test_eval_cloud)
+        ("Evaluacja agentowa (tryb w chmurze - parallel)", test_eval_cloud),
+        ("CUDA GPU — dostępność i wydajność NVIDIA", test_cuda_gpu),
+        ("Monitoring - powiadomienia i uaktualnienia (brrr)", test_monitoring),
     ]
     
     all_passed = True
