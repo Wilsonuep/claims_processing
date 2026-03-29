@@ -1,12 +1,11 @@
 import time
 import json
 import sys
-import cloudscraper
+import os
+import requests
 from datetime import datetime, timezone
 from urllib.parse import quote
 
-# Reconfigure stdout for UTF-8 on Windows (prevents UnicodeEncodeError
-# when printing emoji/special chars in cmd.exe / PowerShell)
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -16,26 +15,99 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 
 API_URL = "https://pl.wikipedia.org/w/api.php"
 
-session = cloudscraper.create_scraper()
+USER_AGENT = (
+    "PolishWikipediaScraper/1.0 "
+    "(claims_processing project; contact: piotr.wilma@hotmail.com) "
+    "python-requests/2.x"
+)
 
-# Timeout dla requestów (sekundy)
+MAXLAG = 5
 REQUEST_TIMEOUT = 30
+MIN_DELAY = 1.0
+
+session = requests.Session()
+session.headers.update({"User-Agent": USER_AGENT})
 
 
 # ---------------------------------------------------------------------------
-# Pobieranie listy artykułów (namespace 0 = artykuły)
+# Core HTTP layer — all retry/backoff/maxlag logic lives here ONLY
+# ---------------------------------------------------------------------------
+
+def _request_get(params: dict, retries: int = 6) -> dict:
+    """
+    Single GET to the API. Handles:
+      - maxlag (503 + Retry-After, or JSON error.code == 'maxlag')
+      - 429 Too Many Requests + Retry-After
+      - network errors (ConnectionError, Timeout) — exponential backoff
+      - HTTP errors — exponential backoff
+      - API-level errors in JSON — raises RuntimeError immediately
+        (no retry, these are logical errors like bad params)
+
+    All callers can assume: if this returns, data is valid.
+    If it raises, the error is unrecoverable after all retries.
+    """
+    params = {**params, "maxlag": MAXLAG}
+
+    for attempt in range(1, retries + 1):
+        try:
+            r = session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
+
+            # Maxlag throttle from server
+            if r.status_code == 503:
+                wait = float(r.headers.get("Retry-After", 30))
+                print(f"    ⏳ maxlag 503 — czekam {wait:.0f}s (próba {attempt}/{retries})")
+                time.sleep(wait)
+                continue
+
+            # Rate limit
+            if r.status_code == 429:
+                wait = float(r.headers.get("Retry-After", 60))
+                print(f"    ⏳ rate limit 429 — czekam {wait:.0f}s (próba {attempt}/{retries})")
+                time.sleep(wait)
+                continue
+
+            r.raise_for_status()
+            data = r.json()
+
+            # Maxlag returned as JSON error (some MW versions)
+            if "error" in data:
+                err = data["error"]
+                if err.get("code") == "maxlag":
+                    wait = float(err.get("lag", MAXLAG)) + 1
+                    print(f"    ⏳ maxlag JSON — lag={err.get('lag')}s, czekam {wait:.0f}s (próba {attempt}/{retries})")
+                    time.sleep(wait)
+                    continue
+                # Any other API error is a programming/logic error — don't retry
+                raise RuntimeError(f"API error [{err.get('code')}]: {err.get('info', err)}")
+
+            return data
+
+        except RuntimeError:
+            raise  # Programming errors bubble up immediately
+
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == retries:
+                raise
+            wait = min(2 ** attempt, 120)
+            print(f"    ⏳ błąd sieci — czekam {wait}s (próba {attempt}/{retries})")
+            time.sleep(wait)
+
+        except requests.exceptions.HTTPError:
+            if attempt == retries:
+                raise
+            wait = min(2 ** attempt, 120)
+            print(f"    ⏳ HTTP {r.status_code} — czekam {wait}s (próba {attempt}/{retries})")
+            time.sleep(wait)
+
+    raise RuntimeError(f"Nie udało się wykonać zapytania po {retries} próbach.")
+
+
+# ---------------------------------------------------------------------------
+# Fetch page title list via allpages
 # ---------------------------------------------------------------------------
 
 def fetch_article_batch(ap_continue: str | None = None,
                         limit: int = 50) -> tuple[list[dict], str | None]:
-    """
-    Pobiera partię tytułów artykułów z polskiej Wikipedii
-    za pomocą list=allpages (namespace 0 = główna przestrzeń).
-
-    Zwraca:
-    - listę słowników z kluczami 'pageid' i 'title'
-    - token kontynuacji (None jeśli koniec)
-    """
     params = {
         "action": "query",
         "list": "allpages",
@@ -43,28 +115,25 @@ def fetch_article_batch(ap_continue: str | None = None,
         "aplimit": limit,
         "apfilterredir": "nonredirects",
         "format": "json",
+        "formatversion": 2,
     }
     if ap_continue:
         params["apcontinue"] = ap_continue
 
-    r = session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
-    r.raise_for_status()
-    data = r.json()
-
+    data = _request_get(params)
     pages = data.get("query", {}).get("allpages", [])
     cont = data.get("continue", {}).get("apcontinue")
-
     return pages, cont
 
 
 # ---------------------------------------------------------------------------
-# Pomocnicze: zapytanie batch z obsługą kontynuacji i retries
+# Generic paginated query for a batch of titles
 # ---------------------------------------------------------------------------
 
-def _query_batch(titles: list[str], retries: int = 3, **extra_params) -> list[dict]:
+def _query_batch(titles: list[str], **extra_params) -> list[dict]:
     """
-    Wykonuje action=query z podanymi parametrami dla partii tytułów.
-    Obsługuje kontynuację wewnątrz zapytania oraz ponawia próby.
+    Runs action=query for given titles, merging all continuation pages.
+    No exception handling here — errors propagate to the caller.
     """
     params = {
         "action": "query",
@@ -77,61 +146,48 @@ def _query_batch(titles: list[str], retries: int = 3, **extra_params) -> list[di
     all_pages: dict[int, dict] = {}
 
     while True:
-        data = None
-        for attempt in range(1, retries + 1):
-            try:
-                r = session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
-                r.raise_for_status()
-                data = r.json()
-
-                # Sprawdź czy API nie zwróciło błędu
-                if "error" in data:
-                    raise RuntimeError(f"API error: {data['error'].get('info', data['error'])}")
-                break
-            except Exception as e:
-                if attempt == retries:
-                    raise
-                wait = 2 ** attempt
-                print(f"    ↻ Retry {attempt}/{retries} za {wait}s ({e})")
-                time.sleep(wait)
+        data = _request_get(params)
 
         for p in data.get("query", {}).get("pages", []):
             pid = p.get("pageid")
             if pid is None or p.get("missing"):
                 continue
             if pid in all_pages:
-                for key in p:
+                for key, val in p.items():
                     if key in ("pageid", "title", "ns"):
                         continue
-                    if isinstance(p[key], list) and key in all_pages[pid]:
-                        all_pages[pid][key].extend(p[key])
+                    if isinstance(val, list) and key in all_pages[pid]:
+                        all_pages[pid][key].extend(val)
                     else:
-                        all_pages[pid][key] = p[key]
+                        all_pages[pid][key] = val
             else:
                 all_pages[pid] = p
 
         if "continue" not in data:
             break
+
         params.update(data["continue"])
+        time.sleep(0.5)  # Small pause between continuation pages
 
     return list(all_pages.values())
 
 
-
 # ---------------------------------------------------------------------------
-# Pobieranie metadanych i treści artykułów
+# Fetch full article details — 3 batched API calls
 # ---------------------------------------------------------------------------
 
-def fetch_article_details(titles: list[str], delay: float = 0.3) -> list[dict]:
+def fetch_article_details(titles: list[str], delay: float = MIN_DELAY) -> list[dict]:
     """
-    Pobiera szczegóły dla partii artykułów (max 50 tytułów).
-    Wszystkie zapytania są batch (szybkie, wiele artykułów na raz):
-    1. extracts + info     — tekst artykułu, długość, data ostatniej modyfikacji
-    2. extlinks            — liczba linków zewnętrznych (≈ referencje)
-    3. categories          — kategorie artykułu
-    """
+    Makes 3 sequential batch API calls for the given titles:
+      1. extracts + info  — article text, length, last edit date
+      2. extlinks         — external links count (≈ references)
+      3. categories       — article categories
 
-    # --- 1. Tekst (extract) + info (batch) ---
+    Raises on any failure — no silent data loss.
+    """
+    delay = max(delay, MIN_DELAY)
+
+    # 1. Text + metadata
     pages_main = _query_batch(
         titles,
         prop="extracts|info",
@@ -143,10 +199,14 @@ def fetch_article_details(titles: list[str], delay: float = 0.3) -> list[dict]:
     page_map: dict[int, dict] = {}
     for p in pages_main:
         pid = p["pageid"]
+        title = p.get("title", "")
         page_map[pid] = {
             "pageid": pid,
-            "title": p.get("title"),
-            "url": f"https://pl.wikipedia.org/wiki/{quote(p.get('title', '').replace(' ', '_'), safe='/:@!$&()*+,;=')}",
+            "title": title,
+            "url": (
+                "https://pl.wikipedia.org/wiki/"
+                + quote(title.replace(" ", "_"), safe="/:@!$&()*+,;=")
+            ),
             "text": p.get("extract"),
             "content_length": p.get("length"),
             "last_edited": p.get("touched"),
@@ -156,222 +216,157 @@ def fetch_article_details(titles: list[str], delay: float = 0.3) -> list[dict]:
 
     time.sleep(delay)
 
-    # --- 2. Linki zewnętrzne (batch) ---
-    try:
-        pages_extlinks = _query_batch(
-            titles,
-            prop="extlinks",
-            ellimit="max",
-        )
-        for p in pages_extlinks:
-            pid = p.get("pageid")
-            if pid and pid in page_map:
-                page_map[pid]["number_of_references"] = len(p.get("extlinks", []))
-    except Exception as e:
-        print(f"    ⚠ Nie udało się pobrać referencji: {e}")
+    # 2. External links
+    pages_extlinks = _query_batch(titles, prop="extlinks", ellimit="max")
+    for p in pages_extlinks:
+        pid = p.get("pageid")
+        if pid and pid in page_map:
+            page_map[pid]["number_of_references"] = len(p.get("extlinks", []))
 
     time.sleep(delay)
 
-    # --- 3. Kategorie (batch) ---
-    try:
-        pages_cats = _query_batch(
-            titles,
-            prop="categories",
-            cllimit="max",
-        )
-        for p in pages_cats:
-            pid = p.get("pageid")
-            if pid and pid in page_map:
-                cats = p.get("categories", [])
-                page_map[pid]["categories"] = [
-                    c["title"].replace("Kategoria:", "") for c in cats
-                ]
-    except Exception as e:
-        print(f"    ⚠ Nie udało się pobrać kategorii: {e}")
+    # 3. Categories
+    pages_cats = _query_batch(titles, prop="categories", cllimit="max")
+    for p in pages_cats:
+        pid = p.get("pageid")
+        if pid and pid in page_map:
+            page_map[pid]["categories"] = [
+                c["title"].replace("Kategoria:", "").strip()
+                for c in p.get("categories", [])
+            ]
 
     return list(page_map.values())
 
 
 # ---------------------------------------------------------------------------
-# Zapis JSON i stan (resume)
+# JSONL output + atomic state management
 # ---------------------------------------------------------------------------
 
-def _save_json(data: list[dict], path: str):
-    """Zapisuje listę słowników do pliku JSON."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _save_jsonl_append(data: list[dict], path: str):
+    with open(path, "a", encoding="utf-8") as f:
+        for item in data:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
 def _state_path(output_path: str) -> str:
-    """Zwraca ścieżkę do pliku stanu (obok pliku wynikowego)."""
     return output_path + ".state.json"
 
 
 def _save_state(output_path: str, ap_continue: str | None,
                 total_fetched: int, batch_num: int):
-    """Zapisuje stan scrapingu — token kontynuacji i licznik artykułów."""
+    """Atomic write — prevents corrupt state file on interrupted save."""
     state = {
         "apcontinue": ap_continue,
         "total_fetched": total_fetched,
         "batch_num": batch_num,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
     }
-    with open(_state_path(output_path), "w", encoding="utf-8") as f:
+    tmp = _state_path(output_path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, _state_path(output_path))
 
 
-def _load_state(output_path: str) -> tuple[list[dict], str | None, int, int]:
-    """
-    Próbuje wczytać istniejące wyniki i stan.
-    Zwraca (results, apcontinue, total_fetched, batch_num).
-    Jeśli brak pliku stanu — zwraca puste wartości (start od zera).
-    """
-    import os
+def _load_state(output_path: str) -> tuple[str | None, int, int]:
     sp = _state_path(output_path)
-
-    if not os.path.exists(sp) or not os.path.exists(output_path):
-        return [], None, 0, 0
-
-    try:
-        with open(sp, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        with open(output_path, "r", encoding="utf-8") as f:
-            results = json.load(f)
-        return (
-            results,
-            state.get("apcontinue"),
-            state.get("total_fetched", len(results)),
-            state.get("batch_num", 0),
-        )
-    except Exception:
-        return [], None, 0, 0
+    if not os.path.exists(sp):
+        return None, 0, 0
+    with open(sp, "r", encoding="utf-8") as f:
+        state = json.load(f)
+    return (
+        state.get("apcontinue"),
+        state.get("total_fetched", 0),
+        state.get("batch_num", 0),
+    )
 
 
 def _delete_state(output_path: str):
-    """Usuwa plik stanu po zakończeniu scrapingu."""
-    import os
     sp = _state_path(output_path)
     if os.path.exists(sp):
         os.remove(sp)
 
 
 # ---------------------------------------------------------------------------
-# Główna funkcja: scraping polskiej Wikipedii
+# Main scraper loop
 # ---------------------------------------------------------------------------
 
 def scrape_all_to_json(
-    output_path: str = "polish_wikipedia_articles.json",
-    delay: float = 1.0,
+    output_path: str = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "polish_wikipedia_articles.jsonl",
+    ),
+    delay: float = MIN_DELAY,
     max_articles: int | None = None,
     batch_size: int = 50,
     save_every: int = 500,
 ):
-    """
-    Zbiera artykuły z polskiej Wikipedii i zapisuje je
-    do pliku JSON jako listę obiektów.
+    delay = max(delay, MIN_DELAY)
+    batch_size = min(batch_size, 50)
 
-    Obsługuje wznawianie (resume) — jeśli scraper zostanie przerwany,
-    ponowne uruchomienie kontynuuje od ostatniego zapisanego stanu.
-    Stan jest przechowywany w pliku <output_path>.state.json.
+    ap_continue, total_fetched, batch_num = _load_state(output_path)
 
-    Każdy artykuł zawiera:
-    - id:                    numer porządkowy
-    - pageid:                identyfikator strony w Wikipedii
-    - title:                 tytuł artykułu
-    - url:                   pełny URL do artykułu
-    - text:                  treść artykułu (plain text)
-    - content_length:        długość artykułu (bajty)
-    - last_edited:           data ostatniej modyfikacji
-    - number_of_references:  liczba linków zewnętrznych (przybliżenie referencji)
-    - categories:            lista kategorii
-    - scraped_at:            data scrapingu
-
-    Parametry:
-    - output_path:    ścieżka do pliku wynikowego
-    - delay:          opóźnienie między partiami (w sekundach)
-    - max_articles:   opcjonalny limit artykułów (None = wszystkie)
-    - batch_size:     liczba artykułów w jednej partii (max 50)
-    - save_every:     zapisuj plik co N artykułów (backup przyrostowy)
-    """
-
-    # Próba wznowienia z poprzedniego stanu
-    results, ap_continue, total_fetched, batch_num = _load_state(output_path)
-
-    if results:
-        print(f"▶ Wznawiam scraping — znaleziono {len(results)} artykułów z poprzedniego uruchomienia")
-        print(f"  Kontynuacja od partii {batch_num + 1}, apcontinue={ap_continue}")
+    if total_fetched > 0:
+        print(f"▶ Wznawiam od partii {batch_num + 1} | pobrano: {total_fetched} | apcontinue={ap_continue!r}")
     else:
-        print("Rozpoczynam scraping polskiej Wikipedii od początku…")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        print("▶ Rozpoczynam scraping polskiej Wikipedii od początku…")
 
-    print(f"  Limit: {max_articles or 'brak (wszystkie)'}")
-    print(f"  Batch: {batch_size}, delay: {delay}s")
-    print(f"  Output: {output_path}")
-    print()
+    print(f"  Limit    : {max_articles or 'brak (wszystkie)'}")
+    print(f"  Batch    : {batch_size} | Delay: {delay}s | Maxlag: {MAXLAG}s")
+    print(f"  Output   : {output_path}\n")
 
     scraped_at = datetime.now(timezone.utc).isoformat()
 
     while True:
         batch_num += 1
 
-        # Pobierz partię tytułów
-        try:
-            pages, ap_continue = fetch_article_batch(ap_continue, limit=batch_size)
-        except Exception as e:
-            print(f"⚠ Błąd przy pobieraniu listy: {e}")
-            time.sleep(delay * 5)
-            continue
+        # Fetch title list — retry handled inside _request_get
+        # Only truly unrecoverable errors (e.g. bad API key) will raise here
+        pages, ap_continue = fetch_article_batch(ap_continue, limit=batch_size)
 
         if not pages:
-            print("Brak kolejnych artykułów — koniec.")
-            break
+            if ap_continue is None:
+                print("\n✓ Koniec listy artykułów.")
+                break
+            print(f"[Partia {batch_num}] Pusta partia, kontynuuję…")
+            time.sleep(delay)
+            continue
 
         titles = [p["title"] for p in pages]
-        print(f"[Partia {batch_num}] Pobieram {len(titles)} artykułów…", end=" ")
+        print(f"[Partia {batch_num:>5}] {len(titles):>2} artykułów… ", end="", flush=True)
 
-        try:
-            details = fetch_article_details(titles, delay=0.3)
-            for article in details:
-                total_fetched += 1
-                article["id"] = total_fetched
-                article["scraped_at"] = scraped_at
-                results.append(article)
+        # Fetch details — also retried internally; only crashes on logic errors
+        details = fetch_article_details(titles, delay=delay)
 
-            print(f"OK (razem: {total_fetched})")
-        except Exception as e:
-            print(f"⚠ Błąd: {e}")
+        for article in details:
+            total_fetched += 1
+            article["id"] = total_fetched
+            article["scraped_at"] = scraped_at
 
-        # Zapis przyrostowy co save_every artykułów + stan
-        if total_fetched % save_every < batch_size:
-            _save_json(results, output_path)
+        _save_jsonl_append(details, output_path)
+        print(f"OK  (razem: {total_fetched})")
+
+        # Periodic state backup
+        if total_fetched > 0 and (total_fetched % save_every) < batch_size:
             _save_state(output_path, ap_continue, total_fetched, batch_num)
-            print(f"  💾 Backup: {len(results)} rekordów → {output_path}")
+            print(f"  💾 Stan zapisany ({total_fetched} rekordów)")
 
-        # Sprawdź limit
         if max_articles and total_fetched >= max_articles:
-            print(f"\nOsiągnięto limit {max_articles} artykułów.")
+            print(f"\n✓ Osiągnięto limit {max_articles} artykułów.")
             break
 
-        # Koniec paginacji
         if ap_continue is None:
-            print("\nKoniec listy artykułów.")
+            print("\n✓ Koniec listy artykułów.")
             break
 
         time.sleep(delay)
 
-    # Zapis końcowy + usunięcie pliku stanu (scraping zakończony)
-    _save_json(results, output_path)
     _delete_state(output_path)
     print(f"\n{'='*60}")
-    print(f"Zapisano {len(results)} artykułów do {output_path}")
+    print(f"  Zapisano {total_fetched} artykułów → {output_path}")
     print(f"{'='*60}")
 
 
-# ---------------------------------------------------------------------------
-# Punkt wejścia
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    # Domyślnie: 1000 artykułów. Zmień max_articles=None aby pobrać wszystkie.
-    # UWAGA: polska Wikipedia ma ~1.5M+ artykułów — pełny scraping trwa wiele godzin.
-    # Scraper obsługuje wznawianie — ponowne uruchomienie kontynuuje od ostatniego stanu.
-    scrape_all_to_json(max_articles=1000)
-
+    scrape_all_to_json(max_articles=None)
