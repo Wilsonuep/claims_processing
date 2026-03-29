@@ -56,8 +56,10 @@ REQUIREMENTS: list[str] = [
     "numpy",
     # --- SQLite extensions ---
     "sqlite-vec",
-    "pysqlite3-binary",
 ]
+
+if platform.system() != "Windows":
+    REQUIREMENTS.append("pysqlite3-binary")
 
 
 # ---------------------------------------------------------------------------

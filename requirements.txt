@@ -1,0 +1,12 @@
+# Zależności projektu claims_processing
+# Wygenerowano automatycznie przez loader.py
+
+together
+python-dotenv
+pandas
+cloudscraper
+beautifulsoup4
+sentence-transformers
+tqdm
+numpy
+sqlite-vec
