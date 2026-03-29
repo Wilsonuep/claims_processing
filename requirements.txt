@@ -3,9 +3,11 @@
 
 together
 python-dotenv
+requests
 pandas
 cloudscraper
 beautifulsoup4
+duckduckgo-search
 sentence-transformers
 tqdm
 numpy

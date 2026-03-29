@@ -139,7 +139,7 @@ class MonitoringAgent:
 
         self.webhook_url: str = (
             webhook_url or os.getenv("BRRR_WEBHOOK_URL", "")
-        ).strip()
+        ).strip().strip('"').strip("'")
 
         self.machine_name: str = (
             machine_name

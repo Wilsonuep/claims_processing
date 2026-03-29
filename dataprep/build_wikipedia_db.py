@@ -2,7 +2,7 @@
 build_wikipedia_db.py
 =====================
 
-Skrypt pobiera JSON wygenerowany przez scrapper Wikipedii, mapuje płaski tekst (extract)
+Skrypt pobiera JSONL wygenerowany przez scrapper Wikipedii, mapuje płaski tekst (extract)
 na ustrukturyzowane sekcje i akapity, a następnie korzysta z `wikipeda_chunking.py` oraz 
 `wikipedia_db.py` w celu chunkowania, zwektoryzowania i zapisania do bazy danych wektorowej (SQLite + vec0).
 """
@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 
 from pathlib import Path
@@ -55,46 +56,60 @@ def _get_monitoring():
 def parse_article_text(text: str) -> list[Section]:
     """
     Mapuje płaski tekst artykułu na listę obiektów Section (zgodnych z Article TypedDict).
-    Scrapper zapisuje plain-text w polu 'extract'. Używamy prostej heurystyki,
-    aby na podstawie podwójnych znaków nowej linii (\n\n) podzielić zawartość na akapity i sekcje.
+
+    Scrapper Wikipedii używa następującej konwencji znaków nowej linii:
+        - ``\\n\\n\\n`` (potrójny) — granica sekcji (nagłówek sekcji jest blokiem
+          pomiędzy dwoma potrójnymi znakami nowej linii)
+        - ``\\n\\n``  (podwójny) — granica akapitu wewnątrz tej samej sekcji
+        - ``\\n``    (pojedynczy) — łamanie wierszy w akapicie (np. listy wypunktowane)
+
+    Algorytm:
+        1. Dzielimy tekst na sekcje po ``\\n\\n\\n``.
+        2. Pierwsza sekcja = „Wprowadzenie" (brak nagłówka).
+        3. Kolejne sekcje: pierwsza linia po splicie to nagłówek,
+           reszta to akapity oddzielone ``\\n\\n``.
     """
     sections: list[Section] = []
-    lines = text.split("\n\n")
-    
-    current_section = "Wprowadzenie"
-    current_paragraphs: list[str] = []
-    
-    for block in lines:
-        block = block.strip()
-        if not block:
+
+    # Podział na sekcje (separowane co najmniej potrójnym \n)
+    raw_sections = re.split(r'\n{3,}', text)
+
+    for idx, raw_section in enumerate(raw_sections):
+        raw_section = raw_section.strip()
+        if not raw_section:
             continue
-        
-        # Heurystyka do łapania nagłówków sekcji:
-        # Krótki tekst, 1 linia, bez standardowych znaków kończących zdanie.
-        if len(block) < 100 and '\n' not in block and not block.endswith(('.', '!', '?', ':')):
-            if current_paragraphs:
-                sections.append({
-                    "section_title": current_section,
-                    "paragraphs": current_paragraphs
-                })
-            current_section = block
-            current_paragraphs = []
+
+        if idx == 0:
+            # Pierwszy blok to zawsze "Wprowadzenie" — nie ma nagłówka
+            section_title = "Wprowadzenie"
+            body = raw_section
         else:
-            current_paragraphs.append(block)
-            
-    if current_paragraphs:
-        sections.append({
-            "section_title": current_section,
-            "paragraphs": current_paragraphs
-        })
-        
+            # W kolejnych blokach pierwszy wiersz to tytuł sekcji
+            lines = raw_section.split('\n', 1)
+            section_title = lines[0].strip()
+            body = lines[1].strip() if len(lines) > 1 else ""
+
+        if not body:
+            # Sekcja bez treści (np. „Przypisy", „Uwagi") — pomijamy
+            # lub dodajemy jako pustą, żeby nie zgubić metadanych
+            continue
+
+        # Akapity wewnątrz sekcji rozdzielone podwójnym \n
+        paragraphs = [p.strip() for p in body.split('\n\n') if p.strip()]
+
+        if paragraphs:
+            sections.append({
+                "section_title": section_title,
+                "paragraphs": paragraphs,
+            })
+
     return sections
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Zbuduj bazę wektorową Wikipedii z pliku JSON.")
-    parser.add_argument("--input", default="polish_wikipedia_articles.json", help="Plik wejściowy JSON ze zrzutu Wikipedii")
-    parser.add_argument("--db", default="dataprep/wiki.db", help="Ścieżka do docelowej bazy danych sqlite (vector info)")
+    parser = argparse.ArgumentParser(description="Zbuduj bazę wektorową Wikipedii z pliku JSONL.")
+    parser.add_argument("--input", default="polish_wikipedia_articles.jsonl", help="Plik wejściowy JSONL ze zrzutu Wikipedii")
+    parser.add_argument("--db", default="data/wiki.db", help="Ścieżka do docelowej bazy danych sqlite (vector info)")
     parser.add_argument("--limit", type=int, default=None, help="Liczba artykułów do przetworzenia w ramach bazy (do celów testowych)")
     parser.add_argument("--embed-model", default="sdadas/mmlw-retrieval-roberta-large-v2", help="Rodzaj modelu wczytywanego z HF (sentence-transformers)")
     parser.add_argument("--batch-size", type=int, default=500, help="Rozmiar batcha do zapisu bazy danych i wektoryzacji")
@@ -118,14 +133,42 @@ def _run(args, mon) -> None:
         log.error("Zanim uruchomisz ten skrypt, odpal datascrap/polish_wikipedia_webscrapper.py")
         sys.exit(1)
 
-    # Wczytanie JSON
-    log.info(f"Wczytywanie artykułów z pliku {args.input}...")
-    with open(input_path, "r", encoding="utf-8") as f:
-        raw_articles = json.load(f)
+    # Wczytanie JSONL
+    log.info(f"Wczytywanie artykułów z pliku JSONL {args.input}...")
+    raw_articles: list[dict] = []
+    invalid_lines_count = 0
+    with open(input_path, "r", encoding="utf-8-sig") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw_articles.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                invalid_lines_count += 1
+                if invalid_lines_count <= 10:
+                    log.warning(
+                        f"Pomijam błędną linię nr {line_no} (JSONDecodeError): {e} "
+                        f"- pierwsze 80 znaków: {line[:80]}"
+                    )
+                elif invalid_lines_count == 11:
+                    log.warning("Zbyt wiele błędnych linii, wstrzymuję logowanie dla kolejnych błędów parsowania JSON.")
+                continue
+            
+            if args.limit and len(raw_articles) >= args.limit:
+                break
+
+    if invalid_lines_count > 0:
+        log.warning(f"Zignorowano łącznie {invalid_lines_count} błędnych linii w procesie ładowania pliku.")
+
+    log.info(f"Wczytano {len(raw_articles)} artykułów z pliku JSONL.")
 
     if args.limit:
-        log.info(f"Nałożono limit. Wybieram pierwsze --limit {args.limit} z {len(raw_articles)} artykułów.")
-        raw_articles = raw_articles[:args.limit]
+        log.info(f"Nałożono limit: {args.limit}. Przeczytano {len(raw_articles)} artykułów.")
+
+    if not raw_articles:
+        log.error("Nie wczytano żadnych artykułów — sprawdź plik wejściowy.")
+        sys.exit(1)
 
     # Parsowanie płaskiego JSON do struktury Article
     log.info(f"Parsowanie {len(raw_articles)} artykułów na ustrukturyzowane obiekty Article...")
@@ -133,6 +176,9 @@ def _run(args, mon) -> None:
     
     for raw in raw_articles:
         text = raw.get("text", "")
+        if not text or not text.strip():
+            continue
+        
         parsed_sections = parse_article_text(text)
         
         structured_articles.append({
@@ -140,6 +186,8 @@ def _run(args, mon) -> None:
             "title": raw.get("title", "Brak Tytułu"),
             "sections": parsed_sections
         })
+
+    log.info(f"Sparsowano {len(structured_articles)} artykułów (pominięto {len(raw_articles) - len(structured_articles)} pustych).")
 
     # Chunkowanie za pomocą dataprep.wikipeda_chunking
     log.info("Rozpoczynam cięcie artykułów na chunki (okna wielozdaniowe)...")

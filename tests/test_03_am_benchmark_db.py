@@ -16,7 +16,7 @@ def test_am_benchmark_db():
             ["W którym roku był chrzest Polski?", "2024", "SUPPORTS", "historia"]
         ]
         csv_path = "test_am_benchmark.csv"
-        with open(csv_path, "w", newline="") as f:
+        with open(csv_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerows(csv_content)
             

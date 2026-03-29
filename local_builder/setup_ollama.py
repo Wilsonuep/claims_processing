@@ -2,33 +2,41 @@
 Ollama Model Setup — downloads and prepares models for local inference.
 ========================================================================
 
+
 Automates the full setup flow:
     1. Check if Ollama is installed and running
     2. Pull specified models (or all 3 by default)
     3. Verify each model responds correctly
     4. Generate .env configuration for llm_client.py
 
+
 Usage (CLI)
 -----------
     # Install all 3 models:
     python -m local_builder.setup_ollama
 
+
     # Install specific model:
     python -m local_builder.setup_ollama --model bielik-11b
+
 
     # Just verify existing models:
     python -m local_builder.setup_ollama --verify-only
 
+
     # Generate .env for a model:
     python -m local_builder.setup_ollama --model llama-3.1-8b --gen-env
+
 
 Usage (Python)
 --------------
     from local_builder.setup_ollama import setup_model, setup_all
 
+
     setup_model("bielik-11b")
     # or
     setup_all()
+
 
 Requirements
 ------------
@@ -36,7 +44,9 @@ Requirements
     - Sufficient VRAM / disk space for chosen models
 """
 
+
 from __future__ import annotations
+
 
 import argparse
 import json
@@ -46,8 +56,11 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any
+
 
 from local_builder.model_registry import (
     MODELS,
@@ -55,6 +68,16 @@ from local_builder.model_registry import (
     get_model,
     list_models,
 )
+
+
+# If ollama is not in PATH, add its default Windows install path dynamically
+if sys.platform == "win32" and not shutil.which("ollama"):
+    _local_app_data = os.environ.get("LOCALAPPDATA")
+    if _local_app_data:
+        _ollama_dir = os.path.join(_local_app_data, "Programs", "Ollama")
+        if os.path.exists(os.path.join(_ollama_dir, "ollama.exe")):
+            os.environ["PATH"] = _ollama_dir + os.pathsep + os.environ["PATH"]
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,9 +87,11 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # OLLAMA DETECTION
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 
 def check_ollama_installed() -> bool:
@@ -74,10 +99,10 @@ def check_ollama_installed() -> bool:
     return shutil.which("ollama") is not None
 
 
+
 def check_ollama_running() -> bool:
     """Checks if the Ollama server is responding."""
     try:
-        import urllib.request
         req = urllib.request.Request(
             "http://localhost:11434/api/tags",
             method="GET",
@@ -86,6 +111,7 @@ def check_ollama_running() -> bool:
             return resp.status == 200
     except Exception:
         return False
+
 
 
 def get_installed_models() -> list[str]:
@@ -109,6 +135,7 @@ def get_installed_models() -> list[str]:
         return []
 
 
+
 def is_model_installed(ollama_tag: str) -> bool:
     """Checks if a specific model is already pulled in Ollama."""
     installed = get_installed_models()
@@ -119,18 +146,22 @@ def is_model_installed(ollama_tag: str) -> bool:
     return False
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MODEL INSTALLATION
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+
 def pull_model(model_name: str) -> bool:
     """Pulls a model via Ollama CLI.
+
 
     Parameters
     ----------
     model_name : str
         Short name from registry: "bielik-11b", "llama-3.1-8b", "deepseek-r1-7b"
+
 
     Returns
     -------
@@ -139,6 +170,7 @@ def pull_model(model_name: str) -> bool:
     """
     model = get_model(model_name)
     tag = model["ollama_tag"]
+
 
     log.info(
         "═" * 50
@@ -149,11 +181,14 @@ def pull_model(model_name: str) -> bool:
         model["display_name"], tag, model["size_gb"],
     )
 
+
     if is_model_installed(tag):
         log.info("  ✅ Already installed — skipping pull.")
         return True
 
+
     log.info("  ⏳ Downloading... (this may take several minutes)")
+
 
     try:
         process = subprocess.Popen(
@@ -164,13 +199,16 @@ def pull_model(model_name: str) -> bool:
             bufsize=1,
         )
 
+
         # Stream output in real-time
         for line in process.stdout:
             line = line.strip()
             if line:
                 log.info("  [ollama] %s", line)
 
+
         process.wait()
+
 
         if process.returncode == 0:
             log.info("  ✅ Pull complete: %s", model["display_name"])
@@ -178,6 +216,7 @@ def pull_model(model_name: str) -> bool:
         else:
             log.error("  ❌ Pull failed with code %d", process.returncode)
             return False
+
 
     except FileNotFoundError:
         log.error(
@@ -189,18 +228,23 @@ def pull_model(model_name: str) -> bool:
         return False
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MODEL VERIFICATION
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+
 def verify_model(model_name: str) -> dict[str, Any]:
     """Sends a test prompt to a model and verifies it responds correctly.
+
+    Uses Ollama's native /api/chat endpoint (no external dependencies).
 
     Parameters
     ----------
     model_name : str
         Short name from registry.
+
 
     Returns
     -------
@@ -214,41 +258,58 @@ def verify_model(model_name: str) -> dict[str, Any]:
     model = get_model(model_name)
     tag = model["llm_model_name"]
 
+
     log.info("Verifying: %s (%s)...", model["display_name"], tag)
 
-    try:
-        from openai import OpenAI
 
-        client = OpenAI(
-            base_url="http://localhost:11434/v1",
-            api_key="local",
+    try:
+        payload = json.dumps({
+            "model": tag,
+            "messages": [
+                {"role": "system", "content": "Odpowiadaj krótko po polsku."},
+                {"role": "user", "content": "Ile województw ma Polska? Odpowiedz jednym zdaniem."},
+            ],
+            "stream": False,
+            "options": {
+                "num_predict": 50,
+                "temperature": 0.1,
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "http://localhost:11434/api/chat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
 
         t0 = time.perf_counter()
 
-        response = client.chat.completions.create(
-            model=tag,
-            messages=[
-                {"role": "system", "content": "Odpowiadaj krótko po polsku."},
-                {"role": "user", "content": "Ile województw ma Polska? Odpowiedz jednym zdaniem."},
-            ],
-            max_tokens=50,
-            temperature=0.1,
-        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
 
         t1 = time.perf_counter()
 
-        content = response.choices[0].message.content.strip()
-        usage = response.usage
+        content = body.get("message", {}).get("content", "").strip()
         elapsed = t1 - t0
 
-        compl_tokens = usage.completion_tokens if usage else len(content.split())
-        tokens_per_sec = compl_tokens / elapsed if elapsed > 0 else 0
+        # Ollama returns eval_count (completion tokens) and eval_duration (ns)
+        eval_count = body.get("eval_count", 0)
+        eval_duration_ns = body.get("eval_duration", 0)
+
+        if eval_duration_ns > 0:
+            tokens_per_sec = eval_count / (eval_duration_ns / 1e9)
+        elif elapsed > 0:
+            tokens_per_sec = max(eval_count, len(content.split())) / elapsed
+        else:
+            tokens_per_sec = 0
+
 
         log.info(
             "  ✅ Response: '%s' (%.1f tok/s, %.2fs)",
             content[:100], tokens_per_sec, elapsed,
         )
+
 
         return {
             "model": model_name,
@@ -259,6 +320,17 @@ def verify_model(model_name: str) -> dict[str, Any]:
             "error": None,
         }
 
+
+    except urllib.error.URLError as e:
+        log.error("  ❌ Connection to Ollama failed: %s", e)
+        return {
+            "model": model_name,
+            "success": False,
+            "response": "",
+            "tokens_per_sec": 0,
+            "elapsed": 0,
+            "error": f"Ollama connection failed: {e}",
+        }
     except Exception as e:
         log.error("  ❌ Verification failed: %s", e)
         return {
@@ -271,13 +343,16 @@ def verify_model(model_name: str) -> dict[str, Any]:
         }
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # .ENV GENERATION
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+
 def generate_env_lines(model_name: str, backend: str = "ollama") -> str:
     """Generates .env lines for a given model.
+
 
     Returns
     -------
@@ -286,6 +361,7 @@ def generate_env_lines(model_name: str, backend: str = "ollama") -> str:
     """
     config = get_env_config(model_name, backend)
     model = get_model(model_name)
+
 
     lines = [
         f"# {model['display_name']} ({model['params']}, {model['quantization']})",
@@ -296,6 +372,7 @@ def generate_env_lines(model_name: str, backend: str = "ollama") -> str:
     return "\n".join(lines)
 
 
+
 def write_env_file(
     model_name: str,
     env_path: str | None = None,
@@ -304,8 +381,10 @@ def write_env_file(
 ) -> str:
     """Writes/updates .env file with model configuration.
 
+
     If preserve_other_vars is True, only LLM_* vars are replaced,
     other variables (like together_api_key) are preserved.
+
 
     Returns
     -------
@@ -316,13 +395,16 @@ def write_env_file(
         project_root = Path(__file__).resolve().parent.parent
         env_path = str(project_root / ".env")
 
+
     config = get_env_config(model_name, backend)
+
 
     # Read existing .env
     existing_lines: list[str] = []
     if os.path.exists(env_path):
         with open(env_path, "r", encoding="utf-8") as f:
             existing_lines = f.readlines()
+
 
     # Filter out old LLM_* lines
     llm_keys = {"LLM_BACKEND", "LLM_MODEL", "LLM_BASE_URL"}
@@ -335,22 +417,27 @@ def write_env_file(
                 filtered.append(line)
         existing_lines = filtered
 
+
     # Append new LLM config
     model = get_model(model_name)
     new_lines = existing_lines.copy()
     if new_lines and not new_lines[-1].endswith("\n"):
         new_lines.append("\n")
 
+
     new_lines.append(f"\n# --- Local LLM: {model['display_name']} ---\n")
     new_lines.append(f"LLM_BACKEND={config['LLM_BACKEND']}\n")
     new_lines.append(f"LLM_MODEL={config['LLM_MODEL']}\n")
     new_lines.append(f"LLM_BASE_URL={config['LLM_BASE_URL']}\n")
 
+
     with open(env_path, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
+
     log.info("Updated %s → %s (%s)", env_path, model_name, backend)
     return env_path
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -358,8 +445,10 @@ def write_env_file(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+
 def setup_model(model_name: str) -> dict[str, Any]:
     """Full setup for a single model: pull + verify.
+
 
     Returns
     -------
@@ -367,12 +456,14 @@ def setup_model(model_name: str) -> dict[str, Any]:
     """
     result = {"model": model_name, "pulled": False, "verified": False, "error": None}
 
+
     if not check_ollama_installed():
         result["error"] = (
             "Ollama not found. Install from https://ollama.com/download"
         )
         log.error(result["error"])
         return result
+
 
     if not check_ollama_running():
         log.warning(
@@ -395,11 +486,13 @@ def setup_model(model_name: str) -> dict[str, Any]:
             log.error(result["error"])
             return result
 
+
     # Pull
     result["pulled"] = pull_model(model_name)
     if not result["pulled"]:
         result["error"] = "Model pull failed."
         return result
+
 
     # Verify
     verify_result = verify_model(model_name)
@@ -408,11 +501,14 @@ def setup_model(model_name: str) -> dict[str, Any]:
     if not result["verified"]:
         result["error"] = verify_result.get("error", "Verification failed")
 
+
     return result
+
 
 
 def setup_all() -> list[dict[str, Any]]:
     """Sets up all 3 models: pull + verify each.
+
 
     Returns
     -------
@@ -422,11 +518,13 @@ def setup_all() -> list[dict[str, Any]]:
     log.info("  LOCAL MODEL SETUP — installing 3 models via Ollama")
     log.info("=" * 60)
 
+
     all_results = []
     for model_name in MODELS:
         result = setup_model(model_name)
         all_results.append(result)
         log.info("")
+
 
     # Summary
     log.info("=" * 60)
@@ -442,12 +540,15 @@ def setup_all() -> list[dict[str, Any]]:
         )
     log.info("=" * 60)
 
+
     return all_results
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 
 def main() -> None:
@@ -488,7 +589,9 @@ def main() -> None:
         help="Show Ollama status and installed models.",
     )
 
+
     args = parser.parse_args()
+
 
     # --- List models ---
     if args.list_models:
@@ -502,6 +605,7 @@ def main() -> None:
         print()
         return
 
+
     # --- Status ---
     if args.status:
         print(f"\nOllama installed: {check_ollama_installed()}")
@@ -513,6 +617,7 @@ def main() -> None:
         print()
         return
 
+
     # --- Gen env ---
     if args.gen_env:
         model_name = args.model
@@ -521,6 +626,7 @@ def main() -> None:
             sys.exit(1)
         print(generate_env_lines(model_name))
         return
+
 
     # --- Write env ---
     if args.write_env:
@@ -532,6 +638,7 @@ def main() -> None:
         print(f"Written to: {path}")
         return
 
+
     # --- Verify only ---
     if args.verify_only:
         targets = [args.model] if args.model else list(MODELS.keys())
@@ -539,11 +646,13 @@ def main() -> None:
             verify_model(name)
         return
 
+
     # --- Full setup ---
     if args.model:
         setup_model(args.model)
     else:
         setup_all()
+
 
 
 if __name__ == "__main__":

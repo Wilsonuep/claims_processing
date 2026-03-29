@@ -19,7 +19,7 @@ def test_demagog_db():
             "detail_url": "http://example.com"
         }]
         json_path = "test_demagog.json"
-        with open(json_path, "w") as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(mock_data, f)
             
         db_path = "test_demagog.db"

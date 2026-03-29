@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claims_processing"
+version = "0.1.0"
+description = "Claims Processing project"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["local_builder*", "agents_dem*", "agents_uam*", "dataprep*", "datascrap*", "eval*", "gen_agent*", "monitoring*", "scripts*"]
+
+[tool.pyright]
+include = ["."]
+executionEnvironments = [
+  { root = "." }
+]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["."]

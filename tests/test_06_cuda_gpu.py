@@ -257,10 +257,10 @@ def _print_full_report() -> None:
         print("=" * 65)
 
         print(f"  PyTorch:          {torch.__version__}")
-        print(f"  CUDA dostępne:    {torch.cuda.is_available()}")
+        print(f"  CUDA dostepne:    {torch.cuda.is_available()}")
 
         if not torch.cuda.is_available():
-            print("  Brak kart CUDA — przerwano raport.")
+            print("  Brak kart CUDA - przerwano raport.")
             print("=" * 65)
             return
 
@@ -269,21 +269,21 @@ def _print_full_report() -> None:
 
         for idx in range(torch.cuda.device_count()):
             info = _get_device_info(idx)
-            print(f"  ─── GPU #{idx}: {info['name']} ───")
+            print(f"  --- GPU #{idx}: {info['name']} ---")
             print(f"    CUDA Capability: {info['cuda_capability']}")
             print(f"    Multiprocessors: {info['multiprocessors']}")
             print(f"    VRAM całkowita:  {info['total_vram_mb']:,} MB")
             print(f"    VRAM wolna:      {info['free_vram_mb']:,} MB")
 
         print()
-        print(f"  ─── Benchmark GEMM ({GEMM_SIZE}×{GEMM_SIZE}, float32) ───")
+        print(f"  --- Benchmark GEMM ({GEMM_SIZE}x{GEMM_SIZE}, float32) ---")
         gflops = _run_gemm_benchmark(GEMM_SIZE, device="cuda:0")
         print(f"    Przepustowość:   {gflops:,.1f} GFLOPS")
         print(f"    Min. wymagane:   {MIN_GFLOPS:,.1f} GFLOPS")
         print(f"    Status:          {'✅ OK' if gflops >= MIN_GFLOPS else '❌ ZBYT WOLNE'}")
 
         print()
-        print("  ─── Weryfikacja numeryczna GPU vs CPU (512×512) ───")
+        print("  --- Weryfikacja numeryczna GPU vs CPU (512x512) ---")
         ok, diff = _verify_numeric_correctness(512)
         print(f"    Max. różnica:    {diff:.2e}")
         print(f"    Tolerancja:      {NUMERIC_TOLERANCE:.2e}")
