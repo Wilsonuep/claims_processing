@@ -173,6 +173,7 @@ def init_db(db_path: str, embedding_dim: int = EMBEDDING_DIM) -> sqlite3.Connect
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row  # wygodny dostęp po nazwie kolumny
+    conn.isolation_level = None      # autocommit — transakcje zarządzamy ręcznie (BEGIN/COMMIT)
 
     # --- Ładowanie rozszerzenia sqlite-vec ---
     # TODO: Jeśli sqlite_vec.load() nie działa w Twoim środowisku,
@@ -279,10 +280,10 @@ def insert_chunks_with_embeddings(
             cur.execute("BEGIN")
 
             for chunk in batch:
-                # 1. Wstaw metadane + tekst do wiki_chunks
+                # 1. Wstaw metadane + tekst do wiki_chunks (INSERT OR IGNORE — pomija duplikaty chunk_id)
                 cur.execute(
                     """
-                    INSERT INTO wiki_chunks
+                    INSERT OR IGNORE INTO wiki_chunks
                         (chunk_id, page_id, title, section_title,
                          paragraph_index, sentence_indices, text, num_tokens)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -298,6 +299,12 @@ def insert_chunks_with_embeddings(
                         chunk.num_tokens,
                     ),
                 )
+
+                # Jeśli INSERT OR IGNORE pominął duplikat — rowcount == 0 → skip embedding
+                if cur.rowcount == 0:
+                    log.debug("Pominięto duplikat chunk_id: %s", chunk.chunk_id)
+                    continue
+
                 row_id = cur.lastrowid
 
                 # 2. Oblicz embedding

@@ -9,7 +9,7 @@ description = "Claims Processing project"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["local_builder*", "agents_dem*", "agents_uam*", "dataprep*", "datascrap*", "eval*", "gen_agent*", "monitoring*", "scripts*"]
+include = ["local_builder*", "agents_dem*", "agents_uam*", "dataprep*", "datascrap*", "eval*", "gen_agent*", "monitoring*", "scripts*", "data*]
 
 [tool.pyright]
 include = ["."]

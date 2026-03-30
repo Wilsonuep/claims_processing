@@ -176,17 +176,19 @@ def write_chunks_jsonl(chunks: list[dict], path: str | Path) -> None:
 # Odczyt / zapis chunków (SQLite)
 # ---------------------------------------------------------------------------
 
+# Schemat zgodny z wikipedia_db.py (id AUTOINCREMENT + osobna kolumna embedding BLOB)
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS wiki_chunks (
-    chunk_id          TEXT PRIMARY KEY,
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    chunk_id          TEXT    NOT NULL UNIQUE,
     page_id           INTEGER NOT NULL,
-    title             TEXT NOT NULL,
-    section_title     TEXT NOT NULL,
+    title             TEXT    NOT NULL,
+    section_title     TEXT,
     paragraph_index   INTEGER NOT NULL,
-    sentence_indices  TEXT NOT NULL,       -- JSON array
-    text              TEXT NOT NULL,
+    sentence_indices  TEXT    NOT NULL,   -- JSON array
+    text              TEXT    NOT NULL,
     num_tokens        INTEGER NOT NULL,
-    embedding         BLOB                -- float32 numpy bytes
+    embedding         BLOB               -- float32 numpy bytes (only used by this module)
 );
 """
 
@@ -232,7 +234,10 @@ def write_chunks_sqlite(
         ))
 
     cur.executemany(
-        f"INSERT OR REPLACE INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        f"""INSERT OR REPLACE INTO {table}
+            (chunk_id, page_id, title, section_title,
+             paragraph_index, sentence_indices, text, num_tokens, embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     con.commit()

@@ -12,3 +12,5 @@ sentence-transformers
 tqdm
 numpy
 sqlite-vec
+pysqlite3-binary  # wymagane na macOS/Linux — SQLite z obsługą rozszerzeń
+openai            # wymagane przez gen_agent/llm_client.py (backend: ollama/vllm/llamacpp)

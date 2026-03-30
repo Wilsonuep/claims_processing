@@ -243,9 +243,13 @@ def fetch_article_details(titles: list[str], delay: float = MIN_DELAY) -> list[d
 # ---------------------------------------------------------------------------
 
 def _save_jsonl_append(data: list[dict], path: str):
+    """Atomicznie dopisuje artykuły do JSONL — buduje cały blok w pamięci,
+    potem robi jeden write(), co minimalizuje ryzyko częściowego zapisu."""
+    block = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in data)
     with open(path, "a", encoding="utf-8") as f:
-        for item in data:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        f.write(block)
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def _state_path(output_path: str) -> str:
@@ -253,30 +257,33 @@ def _state_path(output_path: str) -> str:
 
 
 def _save_state(output_path: str, ap_continue: str | None,
-                total_fetched: int, batch_num: int):
+                total_fetched: int, batch_num: int,
+                seen_pageids: set[int]):
     """Atomic write — prevents corrupt state file on interrupted save."""
     state = {
         "apcontinue": ap_continue,
         "total_fetched": total_fetched,
         "batch_num": batch_num,
         "saved_at": datetime.now(timezone.utc).isoformat(),
+        "seen_pageids": sorted(seen_pageids),  # persist the dedup set
     }
     tmp = _state_path(output_path) + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+        json.dump(state, f, ensure_ascii=False)
     os.replace(tmp, _state_path(output_path))
 
 
-def _load_state(output_path: str) -> tuple[str | None, int, int]:
+def _load_state(output_path: str) -> tuple[str | None, int, int, set[int]]:
     sp = _state_path(output_path)
     if not os.path.exists(sp):
-        return None, 0, 0
+        return None, 0, 0, set()
     with open(sp, "r", encoding="utf-8") as f:
         state = json.load(f)
     return (
         state.get("apcontinue"),
         state.get("total_fetched", 0),
         state.get("batch_num", 0),
+        set(state.get("seen_pageids", [])),
     )
 
 
@@ -303,10 +310,11 @@ def scrape_all_to_json(
     delay = max(delay, MIN_DELAY)
     batch_size = min(batch_size, 50)
 
-    ap_continue, total_fetched, batch_num = _load_state(output_path)
+    ap_continue, total_fetched, batch_num, seen_pageids = _load_state(output_path)
 
     if total_fetched > 0:
         print(f"▶ Wznawiam od partii {batch_num + 1} | pobrano: {total_fetched} | apcontinue={ap_continue!r}")
+        print(f"  Znanych pageid: {len(seen_pageids)} (zostaną pominięte)")
     else:
         if os.path.exists(output_path):
             os.remove(output_path)
@@ -317,12 +325,12 @@ def scrape_all_to_json(
     print(f"  Output   : {output_path}\n")
 
     scraped_at = datetime.now(timezone.utc).isoformat()
+    dupes_skipped = 0
 
     while True:
         batch_num += 1
 
         # Fetch title list — retry handled inside _request_get
-        # Only truly unrecoverable errors (e.g. bad API key) will raise here
         pages, ap_continue = fetch_article_batch(ap_continue, limit=batch_size)
 
         if not pages:
@@ -336,21 +344,32 @@ def scrape_all_to_json(
         titles = [p["title"] for p in pages]
         print(f"[Partia {batch_num:>5}] {len(titles):>2} artykułów… ", end="", flush=True)
 
-        # Fetch details — also retried internally; only crashes on logic errors
+        # Fetch details — also retried internally
         details = fetch_article_details(titles, delay=delay)
 
+        # --- Deduplikacja na poziomie scrapera ---
+        new_details: list[dict] = []
         for article in details:
+            pid = article["pageid"]
+            if pid in seen_pageids:
+                dupes_skipped += 1
+                continue
+            seen_pageids.add(pid)
             total_fetched += 1
             article["id"] = total_fetched
             article["scraped_at"] = scraped_at
+            new_details.append(article)
 
-        _save_jsonl_append(details, output_path)
-        print(f"OK  (razem: {total_fetched})")
+        if new_details:
+            _save_jsonl_append(new_details, output_path)
 
-        # Periodic state backup
-        if total_fetched > 0 and (total_fetched % save_every) < batch_size:
-            _save_state(output_path, ap_continue, total_fetched, batch_num)
-            print(f"  💾 Stan zapisany ({total_fetched} rekordów)")
+        skipped_msg = f"  [{dupes_skipped} dup]" if dupes_skipped else ""
+        print(f"OK  (nowe: {len(new_details)}, razem: {total_fetched}){skipped_msg}")
+
+        # Save state AFTER every successful write (not on a flaky modulo condition)
+        if batch_num % (save_every // batch_size or 1) == 0:
+            _save_state(output_path, ap_continue, total_fetched, batch_num, seen_pageids)
+            print(f"  💾 Stan zapisany ({total_fetched} rekordów, {len(seen_pageids)} uniq pageids)")
 
         if max_articles and total_fetched >= max_articles:
             print(f"\n✓ Osiągnięto limit {max_articles} artykułów.")
@@ -362,9 +381,13 @@ def scrape_all_to_json(
 
         time.sleep(delay)
 
+    # Final state save before cleanup
+    _save_state(output_path, ap_continue, total_fetched, batch_num, seen_pageids)
     _delete_state(output_path)
     print(f"\n{'='*60}")
     print(f"  Zapisano {total_fetched} artykułów → {output_path}")
+    if dupes_skipped:
+        print(f"  Pominięto {dupes_skipped} duplikatów (po pageid)")
     print(f"{'='*60}")
 
 

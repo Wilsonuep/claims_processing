@@ -211,14 +211,14 @@ class MonitoringAgent:
     def update(
         self,
         *,
-        agent_name: str = "",
-        benchmark: str = "",
-        done: int = 0,
-        total: int = 0,
-        correct: int = 0,
-        errors: int = 0,
-        tokens: int = 0,
-        elapsed_sec: float = 0.0,
+        agent_name: str | None = None,
+        benchmark: str | None = None,
+        done: int | None = None,
+        total: int | None = None,
+        correct: int | None = None,
+        errors: int | None = None,
+        tokens: int | None = None,
+        elapsed_sec: float | None = None,
     ) -> None:
         """Update the internal progress state.
 
@@ -228,31 +228,31 @@ class MonitoringAgent:
 
         Parameters
         ----------
-        agent_name : str   Current agent being evaluated.
-        benchmark  : str   Current benchmark name.
-        done       : int   Number of claims processed so far.
-        total      : int   Total claims to process.
-        correct    : int   Correctly classified claims so far.
-        errors     : int   Error count so far.
-        tokens     : int   Cumulative token usage.
-        elapsed_sec: float Wall-clock seconds elapsed for current agent.
+        agent_name : str | None   Current agent being evaluated.
+        benchmark  : str | None   Current benchmark name.
+        done       : int | None   Number of claims processed so far.
+        total      : int | None   Total claims to process.
+        correct    : int | None   Correctly classified claims so far.
+        errors     : int | None   Error count so far.
+        tokens     : int | None   Cumulative token usage.
+        elapsed_sec: float | None Wall-clock seconds elapsed for current agent.
         """
         with self._lock:
-            if agent_name:
+            if agent_name is not None:
                 self._state["agent_name"] = agent_name
-            if benchmark:
+            if benchmark is not None:
                 self._state["benchmark"] = benchmark
-            if done:
+            if done is not None:
                 self._state["done"] = done
-            if total:
+            if total is not None:
                 self._state["total"] = total
-            if correct:
+            if correct is not None:
                 self._state["correct"] = correct
-            if errors:
+            if errors is not None:
                 self._state["errors"] = errors
-            if tokens:
+            if tokens is not None:
                 self._state["tokens"] = tokens
-            if elapsed_sec:
+            if elapsed_sec is not None:
                 self._state["elapsed_sec"] = elapsed_sec
 
     def report_crash(

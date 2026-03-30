@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 
 FILE_PATH = "polish_wikipedia_articles.jsonl"
-INTERVAL_SECONDS = 600  # 1 minute
+INTERVAL_SECONDS = 600  # 10 minutes
 
 
 def get_file_size(path):

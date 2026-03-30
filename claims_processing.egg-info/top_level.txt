@@ -1,9 +1,0 @@
-agents_dem
-agents_uam
-dataprep
-datascrap
-eval
-gen_agent
-local_builder
-monitoring
-scripts

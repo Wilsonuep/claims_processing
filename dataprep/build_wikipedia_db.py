@@ -170,6 +170,21 @@ def _run(args, mon) -> None:
         log.error("Nie wczytano żadnych artykułów — sprawdź plik wejściowy.")
         sys.exit(1)
 
+    # Deduplikacja artykułów po pageid (scraper może zwrócić duplikaty)
+    seen_pageids: set[int] = set()
+    deduped_articles: list[dict] = []
+    for raw in raw_articles:
+        pid = raw.get("pageid", raw.get("id", 0))
+        if pid in seen_pageids:
+            log.warning("Duplikat pageid %s ('%s') — pomijam.", pid, raw.get("title", ""))
+            continue
+        seen_pageids.add(pid)
+        deduped_articles.append(raw)
+
+    if len(deduped_articles) < len(raw_articles):
+        log.info(f"Usunięto {len(raw_articles) - len(deduped_articles)} duplikatów pageid.")
+    raw_articles = deduped_articles
+
     # Parsowanie płaskiego JSON do struktury Article
     log.info(f"Parsowanie {len(raw_articles)} artykułów na ustrukturyzowane obiekty Article...")
     structured_articles: list[Article] = []

@@ -8,3 +8,4 @@ demagog_wypowiedzi_detailed.json
 results/
 *.jsonl
 *.db
+wiki.db-journal
