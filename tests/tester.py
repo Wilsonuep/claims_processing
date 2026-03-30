@@ -8,12 +8,14 @@ from test_04_eval_local import test_eval_local
 from test_05_eval_cloud import test_eval_cloud
 from test_06_cuda_gpu import test_cuda_gpu
 from test_07_monitoring import test_monitoring
+from test_08_crash_recovery import test_crash_recovery
+from test_09_bm25_polish import test_bm25_polish
 
 def run_tests():
     print("=" * 60)
     print("Rozpoczynanie testów integracyjnych (Integrations & Eval Pipeline)")
     print("=" * 60)
-    
+
     tests = [
         ("Rozbicie i wektoryzacja Wikipedii do bazy", test_wikipedia_db),
         ("Załadunek wyników Demagog JSON do bazy DB", test_demagog_db),
@@ -22,6 +24,8 @@ def run_tests():
         ("Evaluacja agentowa (tryb w chmurze - parallel)", test_eval_cloud),
         ("CUDA GPU — dostępność i wydajność NVIDIA", test_cuda_gpu),
         ("Monitoring - powiadomienia i uaktualnienia (brrr)", test_monitoring),
+        ("Crash recovery i resume pętli ewaluacyjnej", test_crash_recovery),
+        ("BM25 tokenizer — polska morfologia i stopwords", test_bm25_polish),
     ]
     
     all_passed = True

@@ -86,8 +86,21 @@ def _get_monitoring():
             class _NoOp:
                 def update(self, **_): pass
                 def report_crash(self, *_, **__): pass
+                def report_done(self, *_, **__): pass
             _monitoring = _NoOp()
     return _monitoring
+
+
+def _fmt_dur(seconds: float) -> str:
+    """Format seconds → '1h 23m', '45m 10s', or '8s'."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, s = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {s:02d}s"
+    hours, m = divmod(minutes, 60)
+    return f"{hours}h {m:02d}m"
 
 
 # ---------------------------------------------------------------------------
@@ -330,19 +343,25 @@ def insert_chunks_with_embeddings(
             conn.commit()
             inserted += len(batch)
             elapsed = __import__('time').perf_counter() - t_start
+            rate = inserted / max(elapsed, 0.1)
+            eta_sec = (total - inserted) / max(rate, 0.001)
             mon.update(
+                mode="build_db",
+                phase="inserting chunks",
                 agent_name="wikipedia_db/insert",
                 benchmark="embedding",
                 done=inserted,
                 total=total,
-                correct=inserted,
                 errors=errors,
-                tokens=0,
                 elapsed_sec=elapsed,
             )
             log.info(
-                "Wstawiono paczkę: %d/%d chunków (%.0f%%)",
-                inserted, total, inserted / total * 100,
+                "[%*d/%d]  %5.1f%%  |  %5.0f ch/s  |  elapsed %-10s |  ETA %s",
+                len(str(total)), inserted, total,
+                inserted / total * 100,
+                rate,
+                _fmt_dur(elapsed),
+                _fmt_dur(eta_sec),
             )
 
         except Exception:
@@ -353,7 +372,19 @@ def insert_chunks_with_embeddings(
             )
             raise
 
-    log.info("Zakończono wstawianie: %d chunków.", inserted)
+    elapsed_total = __import__('time').perf_counter() - t_start
+    avg_rate = inserted / max(elapsed_total, 0.1)
+    log.info(
+        "Zakończono wstawianie: %d chunków w %s (śr. %.0f ch/s).",
+        inserted, _fmt_dur(elapsed_total), avg_rate,
+    )
+    mon.report_done(
+        context="wikipedia_db / insert_chunks",
+        lines=[
+            f"Inserted {inserted:,} chunks in {_fmt_dur(elapsed_total)}",
+            f"Avg speed: {avg_rate:.0f} ch/s",
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------

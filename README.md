@@ -17,9 +17,9 @@ claims_processing/
 ├── gen_agent/                   # 🧩  Shared agent infrastructure (core library)
 │   ├── base_agent.py            #     Abstract BaseAgent class (agent interface)
 │   ├── llm_client.py            #     Universal LLM client factory (Together/Ollama/vLLM/llama.cpp)
-│   ├── bm25.py                  #     Generic BM25 retriever (inverted index, memory-optimized)
-│   ├── rag.py                   #     RAG retriever (BM25 / vector / hybrid + RRF fusion)
-│   └── react.py                 #     Universal ReAct loop & tool parsing
+│   ├── bm25.py                  #     Generic BM25 retriever (inverted index, Polish stopwords + stemming)
+│   ├── rag.py                   #     RAG retriever (BM25 / vector / hybrid + RRF fusion, query cache)
+│   └── react.py                 #     Universal ReAct loop & tool parsing (configurable think-tag stripping)
 │
 ├── datascrap/                   # 🕸  Web scrapers (data acquisition)
 │   ├── demagog_webscrapper.py   #     Scrapes listing pages from Demagog.pl
@@ -27,7 +27,7 @@ claims_processing/
 │   └── polish_wikipedia_webscrapper.py # Scrapes Polish Wikipedia articles via API
 │
 ├── dataprep/                    # 🔧  Data processing & storage
-│   ├── build_wikipedia_db.py    #     Ingests scraped Wikipedia JSON → chunks & vector DB
+│   ├── build_wikipedia_db.py    #     Ingests scraped Wikipedia JSON → chunks & vector DB (6-phase pipeline with ETA)
 │   ├── wikipeda_chunking.py     #     Splits Wikipedia articles → sentence-level chunks
 │   ├── wikipedia_embedding.py   #     Embeds chunks with sentence-transformers (CUDA/MPS/CPU)
 │   ├── wikipedia_db.py          #     SQLite + sqlite-vec vector DB for RAG
@@ -81,6 +81,9 @@ claims_processing/
 │   ├── test_04_eval_local.py    #     Local (tiered) eval loop with a dummy agent
 │   ├── test_05_eval_cloud.py    #     Cloud (parallel) eval loop with a dummy agent
 │   ├── test_06_cuda_gpu.py      #     NVIDIA CUDA availability & GEMM throughput (GPU machines)
+│   ├── test_07_monitoring.py    #     brrr push monitoring alerts
+│   ├── test_08_crash_recovery.py #    Crash recovery & resume (sequential + cloud modes)
+│   ├── test_09_bm25_polish.py   #     Polish BM25 tokenizer (stopwords, stemming, retrieval)
 │   └── eval_completeness_test.py #    Agent evaluation completeness checker (standalone reporter)
 │
 └── data/                        # 📁  Raw / downloaded datasets
@@ -208,6 +211,8 @@ python tests/test_04_eval_local.py      # Local (tiered) eval loop
 python tests/test_05_eval_cloud.py      # Cloud (parallel) eval loop
 python tests/test_06_cuda_gpu.py        # NVIDIA CUDA check (GPU machines only)
 python tests/test_07_monitoring.py      # brrr push monitoring alerts
+python tests/test_08_crash_recovery.py  # Crash recovery & resume
+python tests/test_09_bm25_polish.py     # Polish BM25 tokenizer
 
 # Check evaluation completeness across all agents:
 python tests/eval_completeness_test.py
@@ -219,15 +224,17 @@ python tests/eval_completeness_test.py
 
 All agents live in `agents_uam/` and `agents_dem/` and implement the `BaseAgent` interface from `gen_agent/base_agent.py`.
 
-| Agent ID | File | Strategy | LLM calls/claim | Tools |
-|----------|------|----------|:---:|-------|
-| `uam_ga1`, `dem_ga1` | `single.py` | Zero-shot (no tools) | 1 | — |
-| `uam_ga2`, `dem_ga2` | `single_web.py` | ReAct Zero-shot + web search | 1 | `web_search` |
-| `uam_ga3`, `dem_ga3` | `single_bm25.py` | Open-book BM25 Wikipedia | 1 | `bm25_wikipedia` |
-| `uam_ga4`, `dem_ga4` | `rag_claim_decomp.py` | Claim decomposition + RAG | 2 | `rag_hybrid`, `claim_decomposition` |
-| `uam_ga5`, `dem_ga5` | `bm25_claim_decomp.py` | Claim decomposition + BM25 | 2 | `bm25_wikipedia`, `claim_decomposition` |
-| `uam_ga6`, `dem_ga6` | `fewshot_cot_rag.py` | Few-shot CoT, 3 reasoners + consolidator + RAG | 4–5 | `rag_two_stage`, `claim_decomposition` |
-| `uam_ga7`, `dem_ga7` | `fewshot_cot_debate_rag.py` | Adversarial debate (proponent vs opponent) + judge | 7–8 | `rag_two_stage`, `adversarial_debate` |
+| Agent ID | File | Strategy | Cost tier | LLM calls/claim | Tools |
+|----------|------|----------|:---------:|:---:|-------|
+| `uam_ga1`, `dem_ga1` | `single.py` | Zero-shot (no tools) | 1 | 1 | — |
+| `uam_ga2`, `dem_ga2` | `single_web.py` | ReAct Zero-shot + web search | 1 | 1 | `web_search` |
+| `uam_ga3`, `dem_ga3` | `single_bm25.py` | Open-book BM25 Wikipedia | 1 | 1 | `bm25_wikipedia` |
+| `uam_ga4`, `dem_ga4` | `rag_claim_decomp.py` | Claim decomposition + RAG | 2 | 2 | `rag_hybrid`, `claim_decomposition` |
+| `uam_ga5`, `dem_ga5` | `bm25_claim_decomp.py` | Claim decomposition + BM25 | 2 | 2 | `bm25_wikipedia`, `claim_decomposition` |
+| `uam_ga6`, `dem_ga6` | `fewshot_cot_rag.py` | Few-shot CoT, 3 reasoners + consolidator + RAG | 2 | 4–5 | `rag_two_stage`, `claim_decomposition` |
+| `uam_ga7`, `dem_ga7` | `fewshot_cot_debate_rag.py` | Adversarial debate (proponent vs opponent) + judge | 3 | 7–8 | `rag_two_stage`, `adversarial_debate` |
+
+The `cost_tier` attribute on each agent class drives tiered scheduling in local mode. To declare a custom tier for a new agent, set `cost_tier = <1|2|3>` as a class attribute on your `BaseAgent` subclass.
 
 *Note: Models utilizing dynamic tools (e.g., `web_search`) leverage a standardized ReAct loop from `gen_agent/react.py`. This ensures they reliably use external API tools with high determinism without strictly depending on native tool-calling supports inside some of local open-models.*
 
@@ -239,11 +246,11 @@ Common utilities shared by all agents, extracted into a reusable package:
 
 | Module | Purpose |
 |--------|---------|
-| `base_agent.py` | Abstract `BaseAgent` class — all agents inherit from this |
+| `base_agent.py` | Abstract `BaseAgent` class — all agents inherit from this; exposes a `cost_tier` attribute (1/2/3) used for tiered scheduling |
 | `llm_client.py` | Universal LLM client factory — switches between Together.ai, Ollama, vLLM, and llama.cpp via `LLM_BACKEND` env var |
-| `bm25.py` | Generic BM25 (Okapi) retriever with inverted index, memory-optimized for 1.5M+ chunks |
-| `rag.py` | RAG retriever supporting BM25, vector (sqlite-vec k-NN), and hybrid (RRF fusion) modes; two-stage retrieval with structured evidence provenance |
-| `react.py` | Universal ReAct agent loop for robust and model-agnostic tool calling |
+| `bm25.py` | Generic BM25 (Okapi) retriever with inverted index, memory-optimized for 1.5M+ chunks; Polish stopword filter (120+ tokens) + light suffix stemmer for improved Polish recall |
+| `rag.py` | RAG retriever supporting BM25, vector (sqlite-vec k-NN), and hybrid (RRF fusion) modes; two-stage retrieval with structured evidence provenance; in-process embedding cache for repeated queries |
+| `react.py` | Universal ReAct agent loop for robust and model-agnostic tool calling; configurable `<think>`-tag stripping via `STRIP_THINKING_TAGS` env var |
 
 ---
 
@@ -280,6 +287,9 @@ python -m scripts.run_eval_am_benchmark
 python -m scripts.run_eval_demagog --limit 10          # first 10 claims only
 python -m scripts.run_eval_am_benchmark --agents uam_ga1,uam_ga2
 python -m eval.eval_loop --benchmarks demagog --clear   # clear old results first
+
+# --- Export results to CSV ---
+python -m eval.eval_loop --mode cloud --export-csv results/run.csv
 ```
 
 ### Execution modes
@@ -411,20 +421,23 @@ register_agent(MyAgent())
 
 ## Monitoring & Alerts (`monitoring/`)
 
-The pipeline includes a built-in `MonitoringAgent` that sends periodic progress updates and instant crash alerts to a mobile device via the [brrr API](https://brrr.now/docs/). 
+The pipeline includes a built-in `MonitoringAgent` that sends periodic progress updates, instant crash alerts, and **completion notifications** to a mobile device via the [brrr API](https://brrr.now/docs/).
 
 ### Features
 - **Non-blocking**: All HTTP calls and scheduling are handled in background daemon threads. The evaluation loop is never slowed down.
-- **Progress Updates**: Sends a push notification with accuracy, tokens/sec, ETA, and progress (%) automatically at **08:00, 14:00, and 19:00** (local time).
-- **Instant Crash Alerts**: Any unhandled exception during the evaluation loop or Wikipedia embedding process triggers an immediate notification containing the error message, context, and the last 5 lines of the traceback.
-- **Integrated**: Automatically enabled for all 3 evaluation modes (`sequential`, `cloud`, `local`) as well as the Wikipedia embedding pipeline (`build_wikipedia_db.py`).
+- **Progress Updates**: Sends a push notification automatically at **08:00, 14:00, and 19:00** (local time). The format adapts to context:
+  - *Eval mode*: accuracy, tokens/sec, agent name, benchmark, ETA
+  - *DB-build mode*: current phase, chunk throughput, progress %, ETA
+- **Completion Alerts**: `report_done()` fires an immediate "✅ Done" notification on task success. Wired into `build_wikipedia_db.py`, `demagog_db.py`, `am_benchmark_db.py`, and `eval_loop.py` (after each agent and after each full benchmark).
+- **Instant Crash Alerts**: Any unhandled exception triggers an immediate notification with error message, context, and the last 5 lines of the traceback.
+- **Integrated**: Automatically enabled for all 3 evaluation modes (`sequential`, `cloud`, `local`) as well as all database build scripts.
 
 ### Configuration
 Everything is safely controlled via `.env`:
 ```env
 MONITORING_ACTIVE=true            # Master ON/OFF switch
 BRRR_WEBHOOK_URL=https://...      # Your secret webhook (get it from the brrr app)
-MACHINE_NAME=my-eval-machine      # Helps identify which machine crashed
+MACHINE_NAME=my-eval-machine      # Helps identify which machine sent the alert
 ```
 *Note: If `MONITORING_ACTIVE=false` (or if it's left out), the agent instantly turns into a pass-through module with zero side effects.*
 
@@ -483,6 +496,7 @@ The `gen_agent/llm_client.py` module supports multiple backends via environment 
 | `LLM_BACKEND` | `together`, `ollama`, `vllm`, `llamacpp` | `together` |
 | `LLM_MODEL` | Model name/tag | `openai/gpt-oss-20b` |
 | `LLM_BASE_URL` | Override base URL (optional) | auto per backend |
+| `STRIP_THINKING_TAGS` | Comma-separated tag names to strip from responses | `think,reasoning,scratchpad` |
 
 Example `.env` configurations:
 
@@ -519,6 +533,56 @@ LLM_BASE_URL=http://localhost:8000/v1
 - **Optional**: CUDA GPU or Apple Silicon (for faster embeddings & local inference)
 
 All Python packages are installed automatically by `loader.py`. See `requirements.txt` for the full list.
+
+---
+
+## Recent Improvements
+
+### Build pipeline — rich terminal progress
+
+`build_wikipedia_db.py` now runs as an explicit 6-phase pipeline with per-phase timing banners and rich per-batch progress for the insert+embed loop:
+
+```
+10:20:00  INFO      ── Phase 1/6: Loading JSONL (polish_wikipedia_articles.jsonl) ...
+10:20:03  INFO      ── Phase 1/6: done in 3.1s — 52,341 articles loaded
+10:20:03  INFO      ── Phase 2/6: Deduplication ...
+10:20:04  INFO      ── Phase 2/6: done in 0.9s — 52,341 unique articles
+10:20:04  INFO      ── Phase 3/6: Parsing 52,341 articles ...
+10:20:04  INFO        [  5000/52341]  10%
+...
+10:22:00  INFO      ── Phase 6/6: Init DB + insert (data/wiki.db, batch=500)
+10:22:05  INFO      [    500/150000]   0.3%  |   83 ch/s  |  elapsed 0m 6s   |  ETA 30m 0s
+10:22:11  INFO      [   1000/150000]   0.7%  |   83 ch/s  |  elapsed 0m 12s  |  ETA 29m 54s
+```
+
+### Monitoring — completion notifications & DB-build context
+
+`MonitoringAgent` now supports two modes (`eval` and `build_db`) with context-appropriate progress payloads, and fires an immediate "✅ Done" push notification via `report_done()` when any script finishes. All database builders (`demagog_db.py`, `am_benchmark_db.py`, `build_wikipedia_db.py`) and `eval_loop.py` are fully wired.
+
+### Polish BM25 retriever
+
+`gen_agent/bm25.py` now ships with a 120+ word Polish stopword list and a light suffix stemmer (`_pl_stem`) that normalizes common inflectional endings (e.g. "-ach", "-ami", "-ości", "-ować") so that inflected query forms match corpus tokens more reliably.
+
+### RAG embedding cache
+
+`gen_agent/rag.py` caches query embeddings in-process (`_embed_cache`), eliminating redundant model calls when the same query string is reused across retrieval stages in a single claim evaluation.
+
+### Configurable think-tag stripping
+
+`gen_agent/react.py` strips model chain-of-thought tags via a configurable regex. Set `STRIP_THINKING_TAGS=think,reasoning,scratchpad` (default) in `.env` to control which tags are removed from raw model output before tool parsing and answer extraction.
+
+### Adversarial debate hardening
+
+The `uam_ga7` / `dem_ga7` debate agents now:
+- Remove the unused "critic" debater role (dead code eliminated).
+- Wrap each `run_debater()` call in a try/except — a failing debater yields a `NIEWERYFIKOWALNE` fallback instead of crashing the entire claim.
+
+### New tests
+
+| Test | Coverage |
+|------|---------|
+| `test_08_crash_recovery.py` | Eval loop crash + resume in sequential and cloud modes |
+| `test_09_bm25_polish.py` | Polish stopword filtering, suffix stemming, BM25 retrieval on Polish text |
 
 ---
 

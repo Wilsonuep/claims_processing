@@ -102,7 +102,6 @@ DEBATE_ROUND_MAX_TOKENS: dict[str, int] = {
 DEBATE_TEMPERATURES: dict[str, float] = {
     "proponent": 0.5,
     "opponent": 0.5,
-    "critic": 0.4,   # hook: future neutral critic
 }
 
 DEBATE_TOP_P: float = 0.95
@@ -167,28 +166,9 @@ Konkluzja: [podsumowanie stanowiska]
 Proponowana odpowiedź: [0, 1, 2 lub 3]\
 """
 
-# Hook: future neutral critic prompt
-DEBATER_CRITIC_PROMPT = """\
-Jesteś neutralnym krytykiem analiz fact-checkingowych.
-
-Twoje zadanie: bezstronnie ocenić argumenty obu stron debaty \
-i wskazać mocne oraz słabe strony każdego stanowiska.
-
-KONTEKST DEBATY:
-{debate_context}
-
-Format odpowiedzi:
-Analiza:
-- [ocena argumentów proponenta]
-- [ocena argumentów oponenta]
-Konkluzja: [która strona ma silniejsze argumenty i dlaczego]
-Proponowana odpowiedź: [0, 1, 2 lub 3]\
-"""
-
 DEBATER_PROMPTS: dict[str, str] = {
     "proponent": DEBATER_PROPONENT_PROMPT,
     "opponent": DEBATER_OPPONENT_PROMPT,
-    "critic": DEBATER_CRITIC_PROMPT,
 }
 
 
@@ -406,12 +386,25 @@ def run_debate_rounds(
         round_outputs: list[dict[str, Any]] = []
 
         for role in active_roles:
-            output, t_total, t_prompt, t_compl = run_debater(
-                role=role,
-                evidence_summary=evidence_summary,
-                debate_history=debate_history,
-                round_name=round_name,
-            )
+            try:
+                output, t_total, t_prompt, t_compl = run_debater(
+                    role=role,
+                    evidence_summary=evidence_summary,
+                    debate_history=debate_history,
+                    round_name=round_name,
+                )
+            except Exception as debater_exc:
+                log.warning(
+                    "Debater [%s, %s] failed (%s) — using NIEWERYFIKOWALNE fallback.",
+                    role, round_name, debater_exc,
+                )
+                output = {
+                    "role": role,
+                    "round": round_name,
+                    "label": "NIEWERYFIKOWALNE",
+                    "argument": f"[BŁĄD DEBATORA: {debater_exc}]",
+                }
+                t_total = t_prompt = t_compl = 0
 
             round_outputs.append(output)
             total_tokens += t_total
@@ -659,6 +652,7 @@ class DebateCoTAgent(BaseAgent):
     """
 
     name = AGENT_CONFIG["name"]
+    cost_tier = 3  # 7-8 LLM calls per claim (decompose + 6 debate + 0-1 judge)
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         """Evaluate a single claim via the debate pipeline.

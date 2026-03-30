@@ -70,7 +70,7 @@ Procedura dla każdej wypowiedzi:
 1. Zidentyfikuj główną tezę wypowiedzi.
 2. Wyodrębnij kluczowe fakty do weryfikacji (daty, liczby, nazwy własne, relacje).
 3. W miarę możliwości odnajdź wiarygodne i niezależne źródła.
-4. Sprawdź zgodność wypowiedzi z danymi, aktualność oraz kontekst.
+4. Sprawdź zgodność wypowiedzi z danymi, aktualność oraz kontekst. Oceniaj wypowiedź na podstawie wiedzy dostępnej w momencie jej wygłoszenia (data_wypowiedzi), nie według stanu wiedzy z późniejszego okresu — chyba że twierdzenie dotyczy przyszłości lub jest ponadczasowe.
 5. Zastosuj definicje w kolejności:
    - najpierw rozważ PRAWDA vs FAŁSZ,
    - następnie sprawdź, czy przypadek nie pasuje lepiej do CZĘŚCIOWA_PRAWDA lub MANIPULACJA,

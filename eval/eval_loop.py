@@ -119,15 +119,23 @@ DEFAULT_TIER2_LIMIT: int = 2000
 DEFAULT_TIER3_LIMIT: int = 500
 
 
-def _get_agent_tier(agent_name: str) -> int:
-    """Returns the cost tier (1, 2, or 3) for an agent."""
-    if agent_name in TIER1_AGENTS:
+def _get_agent_tier(agent: "BaseAgent") -> int:
+    """Returns the cost tier (1, 2, or 3) for an agent.
+
+    Prefers the ``cost_tier`` class attribute on the agent when explicitly
+    declared (not just inherited from BaseAgent default). Falls back to
+    name-based lookup for backward compatibility with legacy agents.
+    """
+    # Prefer explicit cost_tier on the agent's own class (not inherited default)
+    if "cost_tier" in type(agent).__dict__:
+        return int(agent.cost_tier)
+    # Legacy fallback: name-based lookup
+    if agent.name in TIER1_AGENTS:
         return 1
-    if agent_name in TIER2_AGENTS:
+    if agent.name in TIER2_AGENTS:
         return 2
-    if agent_name in TIER3_AGENTS:
+    if agent.name in TIER3_AGENTS:
         return 3
-    # Unknown agents default to tier 2 (moderate)
     return 2
 
 
@@ -534,23 +542,34 @@ def eval_benchmark(
             )
 
         # --- Podsumowanie agenta ---
+        acc_pct = correct_count / max(total_claims, 1) * 100
+        avg_time = total_time_sum / max(total_claims, 1)
+        tps = total_tokens_sum / max(total_time_sum, 0.1)
         log.info("═" * 60)
         log.info("Agent: %s — podsumowanie", agent.name)
         log.info("  Twierdzenia:  %d", total_claims)
-        log.info("  Poprawne:     %d (%.1f%%)", correct_count,
-                 correct_count / max(total_claims, 1) * 100)
-        avg_time = total_time_sum / max(total_claims, 1)
-        tps = total_tokens_sum / max(total_time_sum, 0.1)
+        log.info("  Poprawne:     %d (%.1f%%)", correct_count, acc_pct)
         log.info("  Błędy:        %d", error_count)
         log.info("  Tokeny łącz.: %d", total_tokens_sum)
         log.info("  Czas łącz.:   %.1f s", total_time_sum)
         log.info("  Śr. czas/claim: %.2f s (przepustowość: %.1f tok/s)", avg_time, tps)
         log.info("═" * 60)
+        monitoring.report_done(
+            context=f"{agent.name} / {benchmark_name}",
+            lines=[
+                f"{correct_count}/{total_claims} correct ({acc_pct:.1f}%)",
+                f"Errors: {error_count}  |  Tokens: {total_tokens_sum:,}",
+            ],
+        )
 
     # --- Zamknięcie połączeń ---
     input_conn.close()
     results_conn.close()
     log.info("Ewaluacja benchmarku '%s' zakończona.", benchmark_name)
+    monitoring.report_done(
+        context=f"benchmark complete: {benchmark_name}",
+        lines=[f"All {len(agents)} agent(s) finished"],
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -733,23 +752,34 @@ def eval_benchmark_cloud(
         results_conn.commit()
 
         agent_elapsed = time.perf_counter() - t_agent_start
+        acc_pct = correct_count / max(total_claims, 1) * 100
+        avg_time = total_time_sum / max(total_claims, 1)
+        tps = total_tokens_sum / max(total_time_sum, 0.1)
         log.info("═" * 60)
         log.info("Agent: %s — podsumowanie (cloud)", agent.name)
         log.info("  Twierdzenia:  %d", total_claims)
-        log.info("  Poprawne:     %d (%.1f%%)", correct_count,
-                 correct_count / max(total_claims, 1) * 100)
-        avg_time = total_time_sum / max(total_claims, 1)
-        tps = total_tokens_sum / max(total_time_sum, 0.1)
+        log.info("  Poprawne:     %d (%.1f%%)", correct_count, acc_pct)
         log.info("  Błędy:        %d", error_count)
         log.info("  Tokeny łącz.: %d", total_tokens_sum)
         log.info("  Wall-clock:   %.1f s (%.1f claims/s)",
                  agent_elapsed, total_claims / max(agent_elapsed, 0.1))
         log.info("  Śr. czas/claim: %.2f s (przepustowość: %.1f tok/s)", avg_time, tps)
         log.info("═" * 60)
+        monitoring.report_done(
+            context=f"{agent.name} / {benchmark_name}",
+            lines=[
+                f"{correct_count}/{total_claims} correct ({acc_pct:.1f}%)",
+                f"Errors: {error_count}  |  Tokens: {total_tokens_sum:,}",
+            ],
+        )
 
     input_conn.close()
     results_conn.close()
     log.info("Ewaluacja benchmarku '%s' zakończona (cloud mode).", benchmark_name)
+    monitoring.report_done(
+        context=f"benchmark complete: {benchmark_name}",
+        lines=[f"All {len(agents)} agent(s) finished  [cloud]"],
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -796,7 +826,7 @@ def eval_benchmark_local(
     # Group agents by tier
     tier_groups: dict[int, list[BaseAgent]] = {1: [], 2: [], 3: []}
     for agent in agents:
-        tier = _get_agent_tier(agent.name)
+        tier = _get_agent_tier(agent)
         tier_groups[tier].append(agent)
 
     tier_limits = {
@@ -953,22 +983,33 @@ def eval_benchmark_local(
                 )
 
             # Agent summary
+            acc_pct = correct_count / max(total_claims_inner, 1) * 100
+            avg_time = total_time_sum / max(total_claims_inner, 1)
+            tps = total_tokens_sum / max(total_time_sum, 0.1)
             log.info("═" * 60)
             log.info("Agent: %s — podsumowanie (tier %d)", agent.name, tier_num)
             log.info("  Twierdzenia:  %d / %d", total_claims_inner, total_available)
-            log.info("  Poprawne:     %d (%.1f%%)", correct_count,
-                     correct_count / max(total_claims_inner, 1) * 100)
-            avg_time = total_time_sum / max(total_claims_inner, 1)
-            tps = total_tokens_sum / max(total_time_sum, 0.1)
+            log.info("  Poprawne:     %d (%.1f%%)", correct_count, acc_pct)
             log.info("  Błędy:        %d", error_count)
             log.info("  Tokeny łącz.: %d", total_tokens_sum)
             log.info("  Czas łącz.:   %.1f s", total_time_sum)
             log.info("  Śr. czas/claim: %.2f s (przepustowość: %.1f tok/s)", avg_time, tps)
             log.info("═" * 60)
+            monitoring.report_done(
+                context=f"{agent.name} / {benchmark_name}",
+                lines=[
+                    f"{correct_count}/{total_claims_inner} correct ({acc_pct:.1f}%)",
+                    f"Errors: {error_count}  |  Tokens: {total_tokens_sum:,}",
+                ],
+            )
 
     input_conn.close()
     results_conn.close()
     log.info("Ewaluacja benchmarku '%s' zakończona (local mode).", benchmark_name)
+    monitoring.report_done(
+        context=f"benchmark complete: {benchmark_name}",
+        lines=[f"All {len(agents)} agent(s) finished  [local]"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1045,6 +1086,12 @@ def main() -> None:
         "--clear",
         action="store_true",
         help="Wyczyść poprzednie wyniki przed uruchomieniem.",
+    )
+    parser.add_argument(
+        "--export-csv",
+        action="store_true",
+        dest="export_csv",
+        help="Eksportuj wyniki do pliku CSV po zakończeniu ewaluacji.",
     )
 
     # --- Mode selection ---
@@ -1172,6 +1219,26 @@ def main() -> None:
             )
 
     log.info("Ewaluacja wszystkich benchmarków zakończona.")
+
+    # --- Optional CSV export ---
+    if getattr(args, "export_csv", False):
+        import csv
+        for bname in benchmark_names:
+            _, results_db = _resolve_db_paths(bname)
+            if not os.path.exists(results_db):
+                continue
+            csv_path = results_db.replace(".db", ".csv")
+            rconn = sqlite3.connect(results_db)
+            rconn.row_factory = sqlite3.Row
+            rows = rconn.execute("SELECT * FROM agent_results ORDER BY agent_name, claim_id").fetchall()
+            rconn.close()
+            if rows:
+                with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                    writer.writeheader()
+                    writer.writerows(dict(r) for r in rows)
+                log.info("Eksport CSV: %s (%d wierszy)", csv_path, len(rows))
+
     monitoring.stop()
 
 

@@ -150,6 +150,8 @@ class MonitoringAgent:
         # --- Internal state (thread-safe via lock) ---
         self._lock = threading.Lock()
         self._state: dict[str, Any] = {
+            "mode": "eval",      # "eval" | "build_db"
+            "phase": "",         # e.g. "inserting chunks", "chunking"
             "agent_name": "—",
             "benchmark": "—",
             "done": 0,
@@ -211,6 +213,8 @@ class MonitoringAgent:
     def update(
         self,
         *,
+        mode: str | None = None,
+        phase: str | None = None,
         agent_name: str | None = None,
         benchmark: str | None = None,
         done: int | None = None,
@@ -228,16 +232,22 @@ class MonitoringAgent:
 
         Parameters
         ----------
+        mode       : str | None   "eval" or "build_db" — selects notification layout.
+        phase      : str | None   Current phase label (e.g. "inserting chunks").
         agent_name : str | None   Current agent being evaluated.
         benchmark  : str | None   Current benchmark name.
-        done       : int | None   Number of claims processed so far.
-        total      : int | None   Total claims to process.
-        correct    : int | None   Correctly classified claims so far.
+        done       : int | None   Number of items processed so far.
+        total      : int | None   Total items to process.
+        correct    : int | None   Correctly classified claims so far (eval only).
         errors     : int | None   Error count so far.
-        tokens     : int | None   Cumulative token usage.
-        elapsed_sec: float | None Wall-clock seconds elapsed for current agent.
+        tokens     : int | None   Cumulative token usage (eval only).
+        elapsed_sec: float | None Wall-clock seconds elapsed.
         """
         with self._lock:
+            if mode is not None:
+                self._state["mode"] = mode
+            if phase is not None:
+                self._state["phase"] = phase
             if agent_name is not None:
                 self._state["agent_name"] = agent_name
             if benchmark is not None:
@@ -279,6 +289,29 @@ class MonitoringAgent:
             args=(exc, context, tb),
             daemon=True,
             name="monitoring-crash-alert",
+        ).start()
+
+    def report_done(
+        self,
+        context: str = "",
+        lines: list[str] | None = None,
+    ) -> None:
+        """Send an immediate 'task finished' notification.
+
+        Runs in a separate thread so it never raises or blocks the caller.
+
+        Parameters
+        ----------
+        context : str          Human-readable label for what finished.
+        lines   : list[str]    Optional summary lines included in the message body.
+        """
+        if not self.active:
+            return
+        threading.Thread(
+            target=self._send_done,
+            args=(context, lines or []),
+            daemon=True,
+            name="monitoring-done-alert",
         ).start()
 
     # ------------------------------------------------------------------
@@ -348,35 +381,55 @@ class MonitoringAgent:
         """Build brrr JSON payload for a scheduled progress update."""
         done = state["done"]
         total = state["total"]
-        correct = state["correct"]
-        errors = state["errors"]
-        tokens = state["tokens"]
         elapsed = state["elapsed_sec"]
-        agent = state["agent_name"]
-        bench = state["benchmark"]
         started = state["started_at"]
+        mode = state.get("mode", "eval")
 
         pct = done / max(total, 1) * 100
-        acc = correct / max(done - errors, 1) * 100
-        hours_running = (datetime.now() - started).total_seconds() / 3600
-        tps = tokens / max(elapsed, 0.1)
+        running_str = _fmt_duration((datetime.now() - started).total_seconds())
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         # ETA
         if done > 0 and elapsed > 0:
-            sec_per_claim = elapsed / done
-            eta_sec = sec_per_claim * (total - done)
+            eta_sec = (elapsed / done) * (total - done)
             eta_str = _fmt_duration(eta_sec)
         else:
             eta_str = "n/a"
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        if mode == "build_db":
+            phase = state.get("phase", "—")
+            rate = done / max(elapsed, 0.1)
+            message_lines = [
+                f"🔧 Phase: {phase}",
+                f"📦 Progress: {done}/{total} items ({pct:.1f}%)",
+                f"⚡ Speed: {rate:.0f} items/s  |  ⏱ ETA: {eta_str}",
+                f"🕐 Running {running_str} since start",
+                f"🖥 Machine: {self.machine_name}",
+                f"🕑 {now_str}",
+            ]
+            return {
+                "title": f"[{self.machine_name}] DB Build Progress",
+                "subtitle": f"{phase} · {done}/{total} ({pct:.1f}%)",
+                "message": "\n".join(message_lines),
+                "sound": "calm1",
+            }
+
+        # mode == "eval" (default)
+        correct = state["correct"]
+        errors = state["errors"]
+        tokens = state["tokens"]
+        agent = state["agent_name"]
+        bench = state["benchmark"]
+
+        acc = correct / max(done - errors, 1) * 100
+        tps = tokens / max(elapsed, 0.1)
 
         message_lines = [
             f"📊 Progress: {done}/{total} claims ({pct:.1f}%)",
             f"🎯 Accuracy: {acc:.1f}%  |  ❌ Errors: {errors}",
             f"⚡ Speed: {tps:.0f} tok/s  |  ⏱ ETA: {eta_str}",
             f"🤖 Agent: {agent}  |  📂 Bench: {bench}",
-            f"🕐 Running {_fmt_duration(hours_running * 3600)} since start",
+            f"🕐 Running {running_str} since start",
             f"🖥 Machine: {self.machine_name}",
             f"🕑 {now_str}",
         ]
@@ -385,6 +438,21 @@ class MonitoringAgent:
             "title": f"[{self.machine_name}] Eval Progress Update",
             "subtitle": f"{done}/{total} claims · {pct:.1f}%",
             "message": "\n".join(message_lines),
+            "sound": "calm1",
+        }
+
+    def _build_done_payload(
+        self,
+        context: str,
+        lines: list[str],
+    ) -> dict[str, Any]:
+        """Build brrr JSON payload for a task-finished notification."""
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        message_parts = lines + [f"🖥 Machine: {self.machine_name}", f"🕑 {now_str}"]
+        return {
+            "title": f"✅ Done — {self.machine_name}",
+            "subtitle": context,
+            "message": "\n".join(message_parts),
             "sound": "calm1",
         }
 
@@ -465,6 +533,10 @@ class MonitoringAgent:
         tb: str,
     ) -> None:
         payload = self._build_crash_payload(exc, context, tb)
+        self._send(payload)
+
+    def _send_done(self, context: str, lines: list[str]) -> None:
+        payload = self._build_done_payload(context, lines)
         self._send(payload)
 
 

@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import sys
+import time
 
 from pathlib import Path
 
@@ -48,6 +49,7 @@ def _get_monitoring():
                 def start(self): return self
                 def stop(self): pass
                 def report_crash(self, *_, **__): pass
+                def report_done(self, *_, **__): pass
                 def update(self, **_): pass
             _monitoring = _NoOp()
     return _monitoring
@@ -124,17 +126,32 @@ def main():
         mon.stop()
 
 
+def _phase(n: int, total: int, label: str) -> float:
+    """Log a phase start banner and return the start timestamp."""
+    log.info("── Phase %d/%d: %s ...", n, total, label)
+    return time.perf_counter()
+
+
+def _phase_done(n: int, total: int, label: str, t0: float, detail: str = "") -> None:
+    """Log a phase completion banner with elapsed time."""
+    elapsed = time.perf_counter() - t0
+    suffix = f"  —  {detail}" if detail else ""
+    log.info("── Phase %d/%d: done in %.1fs%s", n, total, elapsed, suffix)
+
+
 def _run(args, mon) -> None:
     """Core pipeline logic, separated from main() for clean monitoring wrap."""
-    # Sprawdzenie, czy istnieje plik wejściowy
+    TOTAL_PHASES = 6
+
+    # ── Phase 1: Load JSONL ──────────────────────────────────────────────────
     input_path = Path(args.input)
     if not input_path.exists():
-        log.error(f"!!! Błąd: Nie znaleziono pliku '{args.input}'.")
+        log.error("!!! Błąd: Nie znaleziono pliku '%s'.", args.input)
         log.error("Zanim uruchomisz ten skrypt, odpal datascrap/polish_wikipedia_webscrapper.py")
         sys.exit(1)
 
-    # Wczytanie JSONL
-    log.info(f"Wczytywanie artykułów z pliku JSONL {args.input}...")
+    t0 = _phase(1, TOTAL_PHASES, f"Loading JSONL  ({args.input})")
+    mon.update(mode="build_db", phase="loading JSONL", done=0, total=0)
     raw_articles: list[dict] = []
     invalid_lines_count = 0
     with open(input_path, "r", encoding="utf-8-sig") as f:
@@ -148,29 +165,27 @@ def _run(args, mon) -> None:
                 invalid_lines_count += 1
                 if invalid_lines_count <= 10:
                     log.warning(
-                        f"Pomijam błędną linię nr {line_no} (JSONDecodeError): {e} "
-                        f"- pierwsze 80 znaków: {line[:80]}"
+                        "Pomijam błędną linię nr %d (JSONDecodeError): %s — pierwsze 80 znaków: %s",
+                        line_no, e, line[:80],
                     )
                 elif invalid_lines_count == 11:
-                    log.warning("Zbyt wiele błędnych linii, wstrzymuję logowanie dla kolejnych błędów parsowania JSON.")
+                    log.warning("Zbyt wiele błędnych linii — wstrzymuję logowanie kolejnych błędów JSON.")
                 continue
-            
             if args.limit and len(raw_articles) >= args.limit:
                 break
 
     if invalid_lines_count > 0:
-        log.warning(f"Zignorowano łącznie {invalid_lines_count} błędnych linii w procesie ładowania pliku.")
-
-    log.info(f"Wczytano {len(raw_articles)} artykułów z pliku JSONL.")
-
-    if args.limit:
-        log.info(f"Nałożono limit: {args.limit}. Przeczytano {len(raw_articles)} artykułów.")
-
+        log.warning("Zignorowano łącznie %d błędnych linii.", invalid_lines_count)
     if not raw_articles:
         log.error("Nie wczytano żadnych artykułów — sprawdź plik wejściowy.")
         sys.exit(1)
+    if args.limit:
+        log.info("Limit: %d artykułów.", args.limit)
+    _phase_done(1, TOTAL_PHASES, "Loading JSONL", t0, f"{len(raw_articles):,} articles loaded")
 
-    # Deduplikacja artykułów po pageid (scraper może zwrócić duplikaty)
+    # ── Phase 2: Deduplication ───────────────────────────────────────────────
+    t0 = _phase(2, TOTAL_PHASES, "Deduplication")
+    mon.update(mode="build_db", phase="deduplication", done=0, total=len(raw_articles))
     seen_pageids: set[int] = set()
     deduped_articles: list[dict] = []
     for raw in raw_articles:
@@ -180,90 +195,103 @@ def _run(args, mon) -> None:
             continue
         seen_pageids.add(pid)
         deduped_articles.append(raw)
-
-    if len(deduped_articles) < len(raw_articles):
-        log.info(f"Usunięto {len(raw_articles) - len(deduped_articles)} duplikatów pageid.")
+    dupes = len(raw_articles) - len(deduped_articles)
     raw_articles = deduped_articles
+    _phase_done(2, TOTAL_PHASES, "Deduplication", t0,
+                f"{len(raw_articles):,} unique articles" + (f"  ({dupes} dupes removed)" if dupes else ""))
 
-    # Parsowanie płaskiego JSON do struktury Article
-    log.info(f"Parsowanie {len(raw_articles)} artykułów na ustrukturyzowane obiekty Article...")
+    # ── Phase 3: Parse articles ──────────────────────────────────────────────
+    t0 = _phase(3, TOTAL_PHASES, f"Parsing {len(raw_articles):,} articles")
+    mon.update(mode="build_db", phase="parsing articles", done=0, total=len(raw_articles))
     structured_articles: list[Article] = []
-    
-    for raw in raw_articles:
+    total_to_parse = len(raw_articles)
+    for idx, raw in enumerate(raw_articles, 1):
         text = raw.get("text", "")
         if not text or not text.strip():
             continue
-        
         parsed_sections = parse_article_text(text)
-        
         structured_articles.append({
-            "page_id": raw.get("pageid", raw.get("id", 0)), 
+            "page_id": raw.get("pageid", raw.get("id", 0)),
             "title": raw.get("title", "Brak Tytułu"),
-            "sections": parsed_sections
+            "sections": parsed_sections,
         })
+        if idx % 500 == 0 or idx == total_to_parse:
+            log.info("  [%*d/%d]  %5.1f%%",
+                     len(str(total_to_parse)), idx, total_to_parse, idx / total_to_parse * 100)
+            mon.update(mode="build_db", phase="parsing articles", done=idx, total=total_to_parse)
+    skipped = total_to_parse - len(structured_articles)
+    _phase_done(3, TOTAL_PHASES, "Parsing", t0,
+                f"{len(structured_articles):,} parsed" + (f"  ({skipped} empty skipped)" if skipped else ""))
 
-    log.info(f"Sparsowano {len(structured_articles)} artykułów (pominięto {len(raw_articles) - len(structured_articles)} pustych).")
-
-    # Chunkowanie za pomocą dataprep.wikipeda_chunking
-    log.info("Rozpoczynam cięcie artykułów na chunki (okna wielozdaniowe)...")
+    # ── Phase 4: Chunking ────────────────────────────────────────────────────
+    t0 = _phase(4, TOTAL_PHASES, f"Chunking {len(structured_articles):,} articles")
+    mon.update(mode="build_db", phase="chunking", done=0, total=len(structured_articles))
     try:
         chunks = build_wiki_chunks(structured_articles)
     except Exception as e:
         mon.report_crash(e, context="build_wikipedia_db/build_wiki_chunks")
-        log.error(f"Błąd podczas cięcia artykułów (chunking): {e}")
+        log.error("Błąd podczas cięcia artykułów (chunking): %s", e)
         sys.exit(1)
-        
-    log.info(f"Zakończono cięcie: wygenerowano w sumie {len(chunks)} chunków.")
-
     if not chunks:
         log.warning("Brak chunków do zwektoryzowania — prawdopodobnie zbiór był pusty.")
         sys.exit(0)
+    _phase_done(4, TOTAL_PHASES, "Chunking", t0, f"{len(chunks):,} chunks generated")
 
-    # Inicjalizacja Modelu
-    log.info(f"Inicjalizacja modelu sentence-transformers '{args.embed_model}'...")
+    # ── Phase 5: Load embedding model ────────────────────────────────────────
+    t0 = _phase(5, TOTAL_PHASES, f"Loading model  '{args.embed_model}'")
+    mon.update(mode="build_db", phase="loading embedding model", done=0, total=0)
     try:
         embed_model = load_model(args.embed_model)
     except Exception as e:
         mon.report_crash(e, context="build_wikipedia_db/load_model")
-        log.error(f"Nie udało się załadować modelu {args.embed_model}: {e}")
+        log.error("Nie udało się załadować modelu %s: %s", args.embed_model, e)
         sys.exit(1)
-    
-    # Przetworzenie wymiaru wektorów
-    log.info("Zbadanie wymiarów generowanych wektorów z modelu (embed dim)...")
     test_vec = embed_model.encode("test").tolist()
     embed_dim = len(test_vec)
-    log.info(f"Wymiar wektorów: {embed_dim} (model: {args.embed_model})")
+    _phase_done(5, TOTAL_PHASES, "Model load", t0, f"embed_dim={embed_dim}")
 
     def embed_fn(text: str) -> list[float]:
         return embed_model.encode(text, normalize_embeddings=True).tolist()
 
-    # Tworzenie pliku docelowej bazy (jeśli brakuje w ogóle katalogu, to tworzymy wpierw by uniknąć błędu SQLite)
+    # ── Phase 6: Init DB + insert chunks ─────────────────────────────────────
     db_path_obj = Path(args.db)
     if not db_path_obj.parent.exists():
         db_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-    # Inicjalizacja wektorowej bazy na docelowej przestrzeni
-    log.info(f"Inicjalizacja środowiska SQLite (z vec0). Plik docelowy: {args.db}")
+    t0 = _phase(6, TOTAL_PHASES, f"Init DB + insert  ({args.db},  batch={args.batch_size})")
+    mon.update(mode="build_db", phase="init DB", done=0, total=len(chunks))
     try:
         conn = init_db(str(args.db), embedding_dim=embed_dim)
     except Exception as e:
         mon.report_crash(e, context="build_wikipedia_db/init_db")
-        log.error(f"Nie udało się zainicjalizować bazy SQLite-vec: {e}")
+        log.error("Nie udało się zainicjalizować bazy SQLite-vec: %s", e)
         sys.exit(1)
 
-    # Zapis fragmentów
-    log.info(f"Zapis i wektoryzacja (rozmiar transakcji / batch-size: {args.batch_size}). Cierpliwości...")
-    
     try:
         insert_chunks_with_embeddings(conn, chunks, embed_fn, batch_size=args.batch_size)
     except Exception as e:
         mon.report_crash(e, context="build_wikipedia_db/insert_chunks_with_embeddings")
-        log.error(f"Nie powiodła się próba zapisu bazy danych: {e}")
+        log.error("Nie powiodła się próba zapisu bazy danych: %s", e)
         conn.close()
         sys.exit(1)
-        
+
     conn.close()
-    log.info("Zakończono! Baza wiedzy (wektorowa i BM25 sqlite) zasiliona poprawnie.")
+    _phase_done(6, TOTAL_PHASES, "DB insert", t0, f"{len(chunks):,} chunks stored")
+
+    log.info("=" * 60)
+    log.info("GOTOWE!  Baza wiedzy zasilona: %s", args.db)
+    log.info("  Artykuły:  %d", len(structured_articles))
+    log.info("  Chunki:    %d", len(chunks))
+    log.info("  Embed dim: %d", embed_dim)
+    log.info("=" * 60)
+
+    mon.report_done(
+        context="build_wikipedia_db",
+        lines=[
+            f"{len(chunks):,} chunks from {len(structured_articles):,} articles",
+            f"DB: {args.db}  |  embed_dim={embed_dim}",
+        ],
+    )
 
 if __name__ == "__main__":
     main()

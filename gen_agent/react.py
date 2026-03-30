@@ -7,13 +7,26 @@ from gen_agent.llm_client import client
 
 log = logging.getLogger(__name__)
 
+# Tags to strip before JSON parsing. Can be extended via STRIP_THINKING_TAGS env var
+# (comma-separated tag names, e.g. "think,reasoning,scratchpad").
+import os as _os
+_THINKING_TAGS: tuple[str, ...] = tuple(
+    t.strip() for t in _os.getenv("STRIP_THINKING_TAGS", "think,reasoning,scratchpad").split(",") if t.strip()
+)
+_THINKING_TAG_RE = re.compile(
+    "|".join(rf"<{t}>.*?</{t}>" for t in _THINKING_TAGS),
+    flags=re.DOTALL | re.IGNORECASE,
+)
+
+
 def parse_react_output(text: str) -> dict[str, Any]:
     """
     Parses a ReAct text output looking for a JSON block.
-    Safely strips any DeepSeek <think>...</think> traces first.
+    Strips model-internal thinking tags (<think>, <reasoning>, <scratchpad>, …)
+    before parsing. Configurable via STRIP_THINKING_TAGS env var.
     """
-    # 1. Strip <think> tags completely
-    text_no_think = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    # 1. Strip thinking tags (DeepSeek, QwQ, and similar reasoning models)
+    text_no_think = _THINKING_TAG_RE.sub("", text).strip()
     
     # 2. Extract JSON block. 
     # Match ```json \n { ... } \n ``` or fallback to finding raw {} brackets.

@@ -58,6 +58,7 @@ class BaseAgent(ABC):
     """
 
     name: str
+    cost_tier: int = 2  # 1=fast (≤1 LLM call), 2=moderate (2 calls), 3=expensive (4+ calls)
 
     @abstractmethod
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:

@@ -221,6 +221,7 @@ class RAGRetriever:
         )
         self._embed_device = embed_device
         self._embedding_dim = embedding_dim
+        self._embed_cache: dict[str, list[float]] = {}  # query → embedding cache
 
         if mode in ("vector", "hybrid"):
             if vector_db_path is None:
@@ -304,7 +305,9 @@ class RAGRetriever:
         from dataprep.wikipedia_db import knn_search
 
         embed_fn = self._get_embed_fn()
-        query_embedding = embed_fn(query)
+        if query not in self._embed_cache:
+            self._embed_cache[query] = embed_fn(query)
+        query_embedding = self._embed_cache[query]
 
         results = knn_search(self._vector_conn, query_embedding, k=k)
 

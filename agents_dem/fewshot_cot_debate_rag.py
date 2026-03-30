@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 DEBATE_NUM_ROUNDS: int = 3      
 DEBATE_ROUND_NAMES: list[str] = ["Opening", "Rebuttal", "Closing"]
 DEBATE_ROUND_MAX_TOKENS: dict[str, int] = {"Opening": 768, "Rebuttal": 768, "Closing": 512}
-DEBATE_TEMPERATURES: dict[str, float] = {"proponent": 0.5, "opponent": 0.5, "critic": 0.4}
+DEBATE_TEMPERATURES: dict[str, float] = {"proponent": 0.5, "opponent": 0.5}
 DEBATE_TOP_P: float = 0.95
 JUDGE_TEMPERATURE: float = 0.2
 JUDGE_MAX_TOKENS: int = 1500
@@ -109,7 +109,12 @@ def run_debate_rounds(original_question: str, sub_claims: list[str], evidence: l
     for rd in DEBATE_ROUND_NAMES[:DEBATE_NUM_ROUNDS]:
         r_outs = []
         for role in ["proponent", "opponent"]:
-            out, t_tot, t_prm, t_cmp = run_debater(role, ev_summary, history, rd)
+            try:
+                out, t_tot, t_prm, t_cmp = run_debater(role, ev_summary, history, rd)
+            except Exception as debater_exc:
+                log.warning("Debater [%s, %s] failed (%s) — fallback NIEWERYFIKOWALNE.", role, rd, debater_exc)
+                out = {"role": role, "round": rd, "label": "NIEWERYFIKOWALNE", "argument": f"[BŁĄD: {debater_exc}]"}
+                t_tot = t_prm = t_cmp = 0
             r_outs.append(out)
             tot += t_tot; prm += t_prm; cmp += t_cmp
             transcript_parts.append(f"── {role.upper()} ({rd}) ──\n{out['argument']}\n")
@@ -145,6 +150,7 @@ AGENT_CONFIG = {
 
 class DebateCoTAgent(BaseAgent):
     name = AGENT_CONFIG["name"]
+    cost_tier = 3  # 7-8 LLM calls per claim
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")

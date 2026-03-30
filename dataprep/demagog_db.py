@@ -43,6 +43,28 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Monitoring integration (lazy — no side-effects on import)
+# ---------------------------------------------------------------------------
+
+_monitoring = None  # type: ignore[assignment]
+
+
+def _get_monitoring():
+    global _monitoring
+    if _monitoring is None:
+        try:
+            from monitoring.monitor import MonitoringAgent
+            _monitoring = MonitoringAgent()
+        except Exception:
+            class _NoOp:
+                def start(self): return self
+                def stop(self): pass
+                def report_crash(self, *_, **__): pass
+                def report_done(self, *_, **__): pass
+            _monitoring = _NoOp()
+    return _monitoring
+
 
 # ---------------------------------------------------------------------------
 # Mapowanie pól JSON → kolumny tabeli claims
@@ -342,6 +364,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    mon = _get_monitoring()
+    mon.start()
     conn = init_db(args.db)
 
     try:
@@ -363,8 +387,20 @@ def main() -> None:
             print(f"  {row['label']:<20s} {row['cnt']:>8d}")
         print()
 
+        mon.report_done(
+            context="demagog_db",
+            lines=[
+                f"{total:,} claims ingested → {args.db}",
+                "  |  ".join(f"{r['label']}: {r['cnt']}" for r in label_dist),
+            ],
+        )
+
+    except Exception as exc:
+        mon.report_crash(exc, context="demagog_db/main")
+        raise
     finally:
         conn.close()
+        mon.stop()
         log.info("Połączenie zamknięte.")
 
 
