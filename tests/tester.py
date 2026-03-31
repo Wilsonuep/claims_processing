@@ -10,6 +10,7 @@ from test_06_cuda_gpu import test_cuda_gpu
 from test_07_monitoring import test_monitoring
 from test_08_crash_recovery import test_crash_recovery
 from test_09_bm25_polish import test_bm25_polish
+from test_10_monitoring_progress import test_monitoring_progress
 
 def run_tests():
     print("=" * 60)
@@ -26,6 +27,7 @@ def run_tests():
         ("Monitoring - powiadomienia i uaktualnienia (brrr)", test_monitoring),
         ("Crash recovery i resume pętli ewaluacyjnej", test_crash_recovery),
         ("BM25 tokenizer — polska morfologia i stopwords", test_bm25_polish),
+        ("Monitoring — dokładność progressu i ETA (live payload check)", test_monitoring_progress),
     ]
     
     all_passed = True

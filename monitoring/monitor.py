@@ -149,9 +149,10 @@ class MonitoringAgent:
 
         # --- Internal state (thread-safe via lock) ---
         self._lock = threading.Lock()
+        _now = datetime.now()
         self._state: dict[str, Any] = {
-            "mode": "eval",      # "eval" | "build_db"
-            "phase": "",         # e.g. "inserting chunks", "chunking"
+            "mode": "eval",          # "eval" | "build_db"
+            "phase": "",             # e.g. "inserting chunks", "chunking"
             "agent_name": "—",
             "benchmark": "—",
             "done": 0,
@@ -160,7 +161,8 @@ class MonitoringAgent:
             "errors": 0,
             "tokens": 0,
             "elapsed_sec": 0.0,
-            "started_at": datetime.now(),
+            "started_at": _now,
+            "phase_started_at": _now,  # reset whenever done→0 or phase changes
         }
 
         # --- Scheduler thread ---
@@ -246,14 +248,19 @@ class MonitoringAgent:
         with self._lock:
             if mode is not None:
                 self._state["mode"] = mode
-            if phase is not None:
+            if phase is not None and phase != self._state["phase"]:
                 self._state["phase"] = phase
+                # New phase → reset the phase clock so rate/ETA are fresh
+                self._state["phase_started_at"] = datetime.now()
             if agent_name is not None:
                 self._state["agent_name"] = agent_name
             if benchmark is not None:
                 self._state["benchmark"] = benchmark
             if done is not None:
                 self._state["done"] = done
+                if done == 0:
+                    # Caller explicitly reset progress → start phase clock fresh
+                    self._state["phase_started_at"] = datetime.now()
             if total is not None:
                 self._state["total"] = total
             if correct is not None:
@@ -381,35 +388,54 @@ class MonitoringAgent:
         """Build brrr JSON payload for a scheduled progress update."""
         done = state["done"]
         total = state["total"]
-        elapsed = state["elapsed_sec"]
         started = state["started_at"]
         mode = state.get("mode", "eval")
+        now = datetime.now()
 
         pct = done / max(total, 1) * 100
-        running_str = _fmt_duration((datetime.now() - started).total_seconds())
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        running_str = _fmt_duration((now - started).total_seconds())
+        now_str = now.strftime("%Y-%m-%d %H:%M")
 
-        # ETA
-        if done > 0 and elapsed > 0:
-            eta_sec = (elapsed / done) * (total - done)
-            eta_str = _fmt_duration(eta_sec)
+        # Use live wall-clock elapsed since the current phase started so that
+        # rate and ETA are always up-to-date, even if mon.update() was called
+        # minutes ago (stale elapsed_sec would give wrong numbers otherwise).
+        phase_started = state.get("phase_started_at", started)
+        live_elapsed = max((now - phase_started).total_seconds(), 0.01)
+        rate = done / live_elapsed if done > 0 else 0.0
+        if rate > 0 and total > done:
+            eta_str = _fmt_duration((total - done) / rate)
         else:
             eta_str = "n/a"
 
         if mode == "build_db":
             phase = state.get("phase", "—")
-            rate = done / max(elapsed, 0.1)
+            # For build_db, elapsed_sec is wall-clock time supplied by the caller
+            # (from perf_counter inside insert_chunks_with_embeddings).  Prefer it
+            # over the phase wall-clock whenever it's larger — this handles the case
+            # where phase_started_at was just reset but the caller already knows
+            # how long the current phase has really been running.
+            elapsed_sec_state = state.get("elapsed_sec", 0.0)
+            bd_elapsed = max(live_elapsed, elapsed_sec_state)
+            bd_rate = done / bd_elapsed if done > 0 else 0.0
+            if bd_rate > 0 and total > done:
+                bd_eta_str = _fmt_duration((total - done) / bd_rate)
+            else:
+                bd_eta_str = "n/a"
+            # "Running since start" — also prefer elapsed_sec when started_at is
+            # too recent (e.g. agent created mid-run or right before snapshot).
+            running_secs = max((now - started).total_seconds(), elapsed_sec_state)
+            bd_running_str = _fmt_duration(running_secs)
             message_lines = [
                 f"🔧 Phase: {phase}",
-                f"📦 Progress: {done}/{total} items ({pct:.1f}%)",
-                f"⚡ Speed: {rate:.0f} items/s  |  ⏱ ETA: {eta_str}",
-                f"🕐 Running {running_str} since start",
+                f"📦 Progress: {done:,}/{total:,} ({pct:.2f}%)",
+                f"⚡ Speed: {bd_rate:.0f} items/s  |  ⏱ ETA: {bd_eta_str}",
+                f"🕐 Running {bd_running_str} since start",
                 f"🖥 Machine: {self.machine_name}",
                 f"🕑 {now_str}",
             ]
             return {
                 "title": f"[{self.machine_name}] DB Build Progress",
-                "subtitle": f"{phase} · {done}/{total} ({pct:.1f}%)",
+                "subtitle": f"{phase} · {done:,}/{total:,} ({pct:.2f}%)",
                 "message": "\n".join(message_lines),
                 "sound": "calm1",
             }
@@ -420,6 +446,7 @@ class MonitoringAgent:
         tokens = state["tokens"]
         agent = state["agent_name"]
         bench = state["benchmark"]
+        elapsed = state["elapsed_sec"]
 
         acc = correct / max(done - errors, 1) * 100
         tps = tokens / max(elapsed, 0.1)

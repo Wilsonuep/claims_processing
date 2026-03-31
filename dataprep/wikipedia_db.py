@@ -249,6 +249,7 @@ def insert_chunks_with_embeddings(
     embed_fn: Callable[[str], list[float]],
     *,
     batch_size: int = 500,
+    mon=None,
 ) -> None:
     """Wstawia paczkę chunków do wiki_chunks i ich embeddingów do wiki_chunk_vectors.
 
@@ -282,7 +283,8 @@ def insert_chunks_with_embeddings(
     total = len(chunks)
     inserted = 0
     errors = 0
-    mon = _get_monitoring()
+    if mon is None:
+        mon = _get_monitoring()
     t_start = __import__('time').perf_counter()
 
     for batch_start in range(0, total, batch_size):
@@ -356,7 +358,7 @@ def insert_chunks_with_embeddings(
                 elapsed_sec=elapsed,
             )
             log.info(
-                "[%*d/%d]  %5.1f%%  |  %5.0f ch/s  |  elapsed %-10s |  ETA %s",
+                "[%*d/%d]  %6.2f%%  |  %5.0f ch/s  |  elapsed %-10s |  ETA %s",
                 len(str(total)), inserted, total,
                 inserted / total * 100,
                 rate,

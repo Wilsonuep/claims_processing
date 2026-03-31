@@ -246,6 +246,15 @@ def _run(args, mon) -> None:
         mon.report_crash(e, context="build_wikipedia_db/load_model")
         log.error("Nie udało się załadować modelu %s: %s", args.embed_model, e)
         sys.exit(1)
+
+    # Silence HuggingFace / sentence-transformers INFO noise — our own per-batch
+    # progress log in wikipedia_db.py is the only progress output we want.
+    for _noisy_logger in (
+        "sentence_transformers", "transformers", "tokenizers",
+        "huggingface_hub", "filelock",
+    ):
+        logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
+
     test_vec = embed_model.encode("test").tolist()
     embed_dim = len(test_vec)
     _phase_done(5, TOTAL_PHASES, "Model load", t0, f"embed_dim={embed_dim}")
@@ -268,7 +277,7 @@ def _run(args, mon) -> None:
         sys.exit(1)
 
     try:
-        insert_chunks_with_embeddings(conn, chunks, embed_fn, batch_size=args.batch_size)
+        insert_chunks_with_embeddings(conn, chunks, embed_fn, batch_size=args.batch_size, mon=mon)
     except Exception as e:
         mon.report_crash(e, context="build_wikipedia_db/insert_chunks_with_embeddings")
         log.error("Nie powiodła się próba zapisu bazy danych: %s", e)
