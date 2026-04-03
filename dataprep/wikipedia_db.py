@@ -390,6 +390,65 @@ def insert_chunks_with_embeddings(
 
 
 # ---------------------------------------------------------------------------
+# Batch insert with pre-computed embeddings (used by streaming pipeline)
+# ---------------------------------------------------------------------------
+
+def insert_chunk_batch(
+    conn: sqlite3.Connection,
+    chunk_embedding_pairs: list,
+) -> None:
+    """Insert (Chunk, embedding) pairs in a single transaction.
+
+    Unlike insert_chunks_with_embeddings, embeddings are pre-computed
+    externally (e.g. via model.encode on a batch), so this function only
+    handles serialisation and DB writes.
+
+    Parameters
+    ----------
+    conn : sqlite3.Connection
+        Open connection with sqlite-vec loaded.
+    chunk_embedding_pairs : list[tuple[Chunk, list[float]]]
+        Each element is (chunk, embedding_vector).
+    """
+    if not chunk_embedding_pairs:
+        return
+
+    cur = conn.cursor()
+    try:
+        cur.execute("BEGIN")
+        for chunk, embedding in chunk_embedding_pairs:
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO wiki_chunks
+                    (chunk_id, page_id, title, section_title,
+                     paragraph_index, sentence_indices, text, num_tokens)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chunk.chunk_id,
+                    chunk.page_id,
+                    chunk.title,
+                    chunk.section_title,
+                    chunk.paragraph_index,
+                    json.dumps(chunk.sentence_indices),
+                    chunk.text,
+                    chunk.num_tokens,
+                ),
+            )
+            if cur.rowcount == 0:
+                continue
+            row_id = cur.lastrowid
+            cur.execute(
+                "INSERT INTO wiki_chunk_vectors (rowid, embedding) VALUES (?, ?)",
+                (row_id, serialize_embedding(embedding)),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Wyszukiwanie k-NN
 # ---------------------------------------------------------------------------
 

@@ -169,6 +169,11 @@ class MonitoringAgent:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
+        # --- Alert threads (crash / done) — joined in stop() so they aren't
+        #     killed before the HTTP request completes ---
+        self._alert_threads: list[threading.Thread] = []
+        self._alert_threads_lock = threading.Lock()
+
         if not self.active:
             log.info("[MonitoringAgent] Monitoring is DISABLED (MONITORING_ACTIVE=false).")
         elif not self.webhook_url:
@@ -205,11 +210,17 @@ class MonitoringAgent:
         return self
 
     def stop(self) -> None:
-        """Signal the scheduler to stop and wait briefly for it to exit."""
+        """Signal the scheduler to stop and wait for all pending alerts to flush."""
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
+        # Join pending crash/done alert threads so their HTTP requests complete
+        # before the process exits (they are daemon threads and would be killed otherwise).
+        with self._alert_threads_lock:
+            pending = list(self._alert_threads)
+        for t in pending:
+            t.join(timeout=15)
         log.info("[MonitoringAgent] Scheduler thread stopped.")
 
     def update(
@@ -291,12 +302,15 @@ class MonitoringAgent:
             return
 
         tb = traceback.format_exc()
-        threading.Thread(
+        t = threading.Thread(
             target=self._send_crash,
             args=(exc, context, tb),
             daemon=True,
             name="monitoring-crash-alert",
-        ).start()
+        )
+        with self._alert_threads_lock:
+            self._alert_threads.append(t)
+        t.start()
 
     def report_done(
         self,
@@ -314,12 +328,15 @@ class MonitoringAgent:
         """
         if not self.active:
             return
-        threading.Thread(
+        t = threading.Thread(
             target=self._send_done,
             args=(context, lines or []),
             daemon=True,
             name="monitoring-done-alert",
-        ).start()
+        )
+        with self._alert_threads_lock:
+            self._alert_threads.append(t)
+        t.start()
 
     # ------------------------------------------------------------------
     # Private — scheduler loop

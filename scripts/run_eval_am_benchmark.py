@@ -30,7 +30,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BENCHMARK_NAME = "am_benchmark"
-INPUT_DB_PATH = str(PROJECT_ROOT / "dataprep" / "am_benchmark.db")
+INPUT_DB_PATH = str(PROJECT_ROOT / "data" / "am_benchmark.db")
 RESULTS_DB_PATH = str(PROJECT_ROOT / "results" / "results_am_benchmark.db")
 
 logging.basicConfig(
@@ -65,17 +65,16 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 
 
 def _register_default_agents() -> None:
-    """Rejestruje domyślnych agentów dla benchmarku AM.
+    from eval.eval_loop import register_agent
+    from agents_uam.bm25_claim_decomp import ClaimDecompBM25Agent
+    from agents_uam.rag_claim_decomp import ClaimDecompRAGAgent
+    from agents_uam.fewshot_cot_rag import FewShotCoTAgent
+    from agents_uam.fewshot_cot_debate_rag import DebateCoTAgent
 
-    Dodaj tutaj importy i rejestracje agentów dedykowanych
-    dla AM benchmark, np.:
-
-        from eval.eval_loop import register_agent
-        from agents_uam.some_agent import SomeAgent
-        register_agent(SomeAgent())
-    """
-    # TODO: Zarejestruj agentów, gdy będą gotowi.
-    pass
+    register_agent(ClaimDecompBM25Agent())   # uam_ga5  tier 2
+    register_agent(ClaimDecompRAGAgent())    # uam_ga4  tier 2
+    register_agent(FewShotCoTAgent())        # uam_ga6  tier 3
+    register_agent(DebateCoTAgent())         # uam_ga_7 tier 3
 
 
 # ---------------------------------------------------------------------------
@@ -108,9 +107,38 @@ def main() -> None:
         action="store_true",
         help="Wyczyść poprzednie wyniki przed uruchomieniem.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["local", "cloud", "sequential"],
+        default="local",
+        help="Tryb ewaluacji: local (tiered), cloud (parallel), sequential (default).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=5,
+        help="Liczba równoległych workerów (tylko --mode cloud).",
+    )
+    parser.add_argument(
+        "--tier2-limit",
+        type=int,
+        default=2000,
+        help="Maks. liczba claimów dla agentów tier 2 (tylko --mode local).",
+    )
+    parser.add_argument(
+        "--tier3-limit",
+        type=int,
+        default=500,
+        help="Maks. liczba claimów dla agentów tier 3 (tylko --mode local).",
+    )
     args = parser.parse_args()
 
-    from eval.eval_loop import eval_benchmark, get_registered_agents
+    from eval.eval_loop import (
+        eval_benchmark,
+        eval_benchmark_cloud,
+        eval_benchmark_local,
+        get_registered_agents,
+    )
 
     # Rejestracja agentów
     _register_default_agents()
@@ -133,14 +161,36 @@ def main() -> None:
     log.info("Output DB: %s", RESULTS_DB_PATH)
     log.info("Agenci:    %s", ", ".join(a.name for a in agents))
 
-    eval_benchmark(
-        benchmark_name=BENCHMARK_NAME,
-        input_db_path=INPUT_DB_PATH,
-        results_db_path=RESULTS_DB_PATH,
-        agents=agents,
-        limit=args.limit,
-        clear=args.clear,
-    )
+    if args.mode == "local":
+        eval_benchmark_local(
+            benchmark_name=BENCHMARK_NAME,
+            input_db_path=INPUT_DB_PATH,
+            results_db_path=RESULTS_DB_PATH,
+            agents=agents,
+            limit=args.limit,
+            clear=args.clear,
+            tier2_limit=args.tier2_limit,
+            tier3_limit=args.tier3_limit,
+        )
+    elif args.mode == "cloud":
+        eval_benchmark_cloud(
+            benchmark_name=BENCHMARK_NAME,
+            input_db_path=INPUT_DB_PATH,
+            results_db_path=RESULTS_DB_PATH,
+            agents=agents,
+            limit=args.limit,
+            clear=args.clear,
+            workers=args.workers,
+        )
+    else:
+        eval_benchmark(
+            benchmark_name=BENCHMARK_NAME,
+            input_db_path=INPUT_DB_PATH,
+            results_db_path=RESULTS_DB_PATH,
+            agents=agents,
+            limit=args.limit,
+            clear=args.clear,
+        )
 
     log.info("Ewaluacja AM Benchmark zakończona.")
 
