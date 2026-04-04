@@ -1,101 +1,220 @@
+"""
+Readiness check: Wikipedia RAG pipeline (real embedding model).
+
+Runs the full streaming pipeline on 3 synthetic Polish articles:
+  Phase 1 — Loads the configured sentence-transformers model
+  Phase 2 — Init SQLite+sqlite-vec DB
+  Phase 3 — build_article_chunks → insert_chunk_batch (one article at a time)
+  Phase 4 — knn_search: 'stolica Polski Warszawa' must hit page_id=1
+  Phase 5 — MonitoringAgent state is correct after all insert phases
+
+Passes ↔ embedding model loads, sqlite-vec pipeline builds, knn_search works.
+"""
+from __future__ import annotations
+
 import os
-import json
-import sqlite3
-import time
 import sys
+import time
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dataprep.build_wikipedia_db import parse_article_text
-from dataprep.wikipeda_chunking import build_wiki_chunks
-from dataprep.wikipedia_db import init_db, insert_chunks_with_embeddings
+from dataprep.wikipeda_chunking import build_article_chunks
+from dataprep.wikipedia_db import init_db, insert_chunk_batch, knn_search
+from dataprep.wikipedia_embedding import load_model
+from monitoring.monitor import MonitoringAgent
 
-def test_wikipedia_db():
-    start_time = time.time()
-    try:
-        # Uwaga: scraper Wikipedii używa \n\n\n (potrójny) jako separator sekcji,
-        # \n\n (podwójny) jako separator akapitów, \n (pojedynczy) jako łamanie wierszy.
-        mock_data = [{
-            "id": 1,
-            "title": "Polska",
-            "text": (
-                "Polska to kraj w Europie. Leży w Europie Środkowej."
-                "\n\n\n"
-                "Historia"
-                "\n\n"
-                "Polska ma długą historię. Pierwsza wzmianka pochodzi z X wieku."
-                "\n\n\n"
-                "Geografia"
-                "\n\n"
-                "Polska leży nad Wisłą."
-            )
-        }]
-        
-        structured_articles = []
-        for raw in mock_data:
-            text = raw.get("text", "")
-            parsed_sections = parse_article_text(text)
-            structured_articles.append({
-                "page_id": raw.get("id", 0),
-                "title": raw.get("title", ""),
-                "sections": parsed_sections
-            })
 
-        # Sprawdź, czy parser poprawnie rozpoznał sekcje
-        sections = structured_articles[0]["sections"]
-        section_titles = [s["section_title"] for s in sections]
-        if "Wprowadzenie" not in section_titles:
-            return False, time.time() - start_time, f"Brak sekcji 'Wprowadzenie', znaleziono: {section_titles}"
-        if "Historia" not in section_titles:
-            return False, time.time() - start_time, f"Brak sekcji 'Historia', znaleziono: {section_titles}"
-        if "Geografia" not in section_titles:
-            return False, time.time() - start_time, f"Brak sekcji 'Geografia', znaleziono: {section_titles}"
+# ---------------------------------------------------------------------------
+# Synthetic corpus — 3 distinct Polish topics so knn_search results are clear
+# ---------------------------------------------------------------------------
 
-        chunks = build_wiki_chunks(structured_articles)
-        if len(chunks) == 0:
-            return False, time.time() - start_time, "Brak wygenerowanych chunków"
+_ARTICLES = [
+    {
+        "page_id": 1,
+        "title": "Warszawa",
+        "sections": [
+            {
+                "section_title": "Wprowadzenie",
+                "paragraphs": [
+                    "Warszawa jest stolicą i największym miastem Polski. "
+                    "Leży nad Wisłą, w centrum Mazowsza.",
+                ],
+            },
+            {
+                "section_title": "Historia",
+                "paragraphs": [
+                    "Prawa miejskie Warszawa uzyskała w XIV wieku. "
+                    "Od 1596 roku jest stolicą Rzeczypospolitej.",
+                ],
+            },
+        ],
+    },
+    {
+        "page_id": 2,
+        "title": "Astronomia",
+        "sections": [
+            {
+                "section_title": "Wprowadzenie",
+                "paragraphs": [
+                    "Astronomia to nauka badająca ciała niebieskie. "
+                    "Obejmuje gwiazdy, planety, galaktyki i inne obiekty kosmiczne.",
+                ],
+            },
+            {
+                "section_title": "Układ Słoneczny",
+                "paragraphs": [
+                    "Układ Słoneczny składa się ze Słońca i ośmiu planet. "
+                    "Ziemia jest trzecią planetą od Słońca.",
+                ],
+            },
+        ],
+    },
+    {
+        "page_id": 3,
+        "title": "Kuchnia polska",
+        "sections": [
+            {
+                "section_title": "Wprowadzenie",
+                "paragraphs": [
+                    "Kuchnia polska jest różnorodna i bogata w tradycje. "
+                    "Charakteryzuje się potrawami z mięsa, ziemniaków i kapusty.",
+                ],
+            },
+            {
+                "section_title": "Potrawy",
+                "paragraphs": [
+                    "Do najpopularniejszych potraw należą bigos, pierogi i żurek. "
+                    "Polska kuchnia słynie z bigosu i pierogów.",
+                ],
+            },
+        ],
+    },
+]
 
-        embed_dim = 4
-        def dummy_embed_fn(t): return [0.1, 0.2, 0.3, 0.4]
 
-        db_path = "test_wiki.db"
-        if os.path.exists(db_path): os.remove(db_path)
-        
-        conn = init_db(db_path, embedding_dim=embed_dim)
-        insert_chunks_with_embeddings(conn, chunks, dummy_embed_fn, batch_size=10)
-        
-        count = conn.execute("SELECT count(*) FROM wiki_chunks").fetchone()[0]
-        if count != len(chunks):
-            return False, time.time() - start_time, f"Oczekiwano {len(chunks)} wierszy, otrzymano {count}"
-
-        # Sprawdź, że duplikaty chunk_id nie powodują crash (INSERT OR IGNORE)
-        try:
-            insert_chunks_with_embeddings(conn, chunks, dummy_embed_fn, batch_size=10)
-        except Exception as e:
-            conn.close()
-            if os.path.exists(db_path): os.remove(db_path)
-            return False, time.time() - start_time, f"Duplikaty chunk_id powinny być ignorowane, a nie crash: {e}"
-
-        # Liczba rekordów nie powinna się zmienić po ponownym insercie duplikatów
-        count_after = conn.execute("SELECT count(*) FROM wiki_chunks").fetchone()[0]
-        if count_after != count:
-            conn.close()
-            if os.path.exists(db_path): os.remove(db_path)
-            return False, time.time() - start_time, f"Po re-insercie duplikatów oczekiwano {count}, otrzymano {count_after}"
-        
-        conn.close()
+def test_wikipedia_db() -> tuple[bool, float, str | None]:
+    start = time.time()
+    db_path = "test_wiki_real.db"
+    if os.path.exists(db_path):
         os.remove(db_path)
-            
-        elapsed = time.time() - start_time
-        return True, elapsed, None
+
+    try:
+        # ── Phase 1: Load embedding model ─────────────────────────────────────
+        embed_model_name = os.getenv("EMBED_MODEL", "sdadas/mmlw-retrieval-roberta-large-v2")
+        try:
+            embed_model = load_model(embed_model_name)
+        except Exception as e:
+            return False, time.time() - start, (
+                f"Failed to load embedding model '{embed_model_name}': {e}\n"
+                "Check: pip install sentence-transformers  |  HuggingFace connectivity"
+            )
+
+        embed_dim = len(embed_model.encode("test").tolist())
+
+        # ── Phase 2: Init DB + monitoring agent ───────────────────────────────
+        mon = MonitoringAgent(active=False, webhook_url="", machine_name="test-wiki")
+        mon.update(mode="build_db", phase="init DB", done=0, total=len(_ARTICLES))
+
+        try:
+            conn = init_db(db_path, embedding_dim=embed_dim)
+        except Exception as e:
+            return False, time.time() - start, f"init_db failed: {e}"
+
+        # ── Phase 3: Stream articles → chunk → embed → insert ────────────────
+        total_inserted = 0
+        t0 = time.perf_counter()
+        mon.update(mode="build_db", phase="inserting chunks", done=0, total=len(_ARTICLES))
+
+        for art_idx, article in enumerate(_ARTICLES, 1):
+            chunks = build_article_chunks(article)
+            if not chunks:
+                conn.close()
+                return False, time.time() - start, (
+                    f"build_article_chunks returned no chunks for '{article['title']}'"
+                )
+
+            texts = [c.text for c in chunks]
+            embeddings = embed_model.encode(
+                texts,
+                batch_size=32,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
+            pairs = [(c, emb.tolist()) for c, emb in zip(chunks, embeddings)]
+            insert_chunk_batch(conn, pairs)
+            total_inserted += len(chunks)
+
+            elapsed = time.perf_counter() - t0
+            mon.update(
+                mode="build_db",
+                phase="inserting chunks",
+                done=art_idx,
+                total=len(_ARTICLES),
+                elapsed_sec=elapsed,
+            )
+
+        # ── Phase 4: Verify DB chunk count ────────────────────────────────────
+        db_count = conn.execute("SELECT COUNT(*) FROM wiki_chunks").fetchone()[0]
+        if db_count != total_inserted:
+            conn.close()
+            return False, time.time() - start, (
+                f"DB has {db_count} chunks, expected {total_inserted}"
+            )
+
+        # ── Phase 5: knn_search — Warszawa query must rank page_id=1 first ───
+        query_vec = embed_model.encode(
+            "stolica Polski Warszawa Wisła",
+            normalize_embeddings=True,
+        ).tolist()
+        results = knn_search(conn, query_vec, k=3)
+
+        if not results:
+            conn.close()
+            return False, time.time() - start, "knn_search returned no results"
+
+        top_page_id = results[0]["page_id"]
+        if top_page_id != 1:
+            conn.close()
+            return False, time.time() - start, (
+                f"knn_search top result is page_id={top_page_id} ('{results[0]['title']}'), "
+                f"expected page_id=1 (Warszawa). All hits: "
+                + ", ".join(f"{r['title']} d={r['distance']:.4f}" for r in results)
+            )
+
+        # ── Phase 6: MonitoringAgent state check ──────────────────────────────
+        state = mon._snapshot()
+        if state["done"] != len(_ARTICLES):
+            conn.close()
+            return False, time.time() - start, (
+                f"MonitoringAgent done={state['done']}, expected {len(_ARTICLES)}"
+            )
+        if state["phase"] != "inserting chunks":
+            conn.close()
+            return False, time.time() - start, (
+                f"MonitoringAgent phase='{state['phase']}', expected 'inserting chunks'"
+            )
+        if state["elapsed_sec"] <= 0:
+            conn.close()
+            return False, time.time() - start, "MonitoringAgent elapsed_sec not updated"
+
+        conn.close()
+        return True, time.time() - start, None
+
     except Exception as e:
-        # Cleanup na wypadek błędu
-        if os.path.exists("test_wiki.db"):
-            try: os.remove("test_wiki.db")
-            except: pass
-        return False, time.time() - start_time, str(e)
+        import traceback
+        return False, time.time() - start, f"{e}\n{traceback.format_exc()}"
+    finally:
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except OSError:
+                pass
+
 
 if __name__ == "__main__":
     success, elapsed, err = test_wikipedia_db()
-    if success: print(f"PASSED (Time: {elapsed:.2f}s)")
-    else: print(f"FAILED (Time: {elapsed:.2f}s, Error: {err})")
+    if success:
+        print(f"PASSED ({elapsed:.2f}s)")
+    else:
+        print(f"FAILED ({elapsed:.2f}s): {err}")

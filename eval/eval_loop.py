@@ -41,6 +41,7 @@ import logging
 import os
 import sqlite3
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -671,7 +672,6 @@ def eval_benchmark_cloud(
     total_claims = len(claims)
     log.info("Załadowano %d twierdzeń.", total_claims)
 
-    import threading
     db_lock = threading.Lock()
 
     for agent in agents:

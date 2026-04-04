@@ -100,6 +100,9 @@ DEFAULT_DEVICE: str | None = None  # auto-detect: cuda > mps > cpu
 # Ładowanie modelu
 # ---------------------------------------------------------------------------
 
+_MODEL_CACHE: dict[tuple, object] = {}
+
+
 def load_model(
     model_name: str = DEFAULT_MODEL,
     device: str | None = DEFAULT_DEVICE,
@@ -122,16 +125,22 @@ def load_model(
     SentenceTransformer
         Załadowany model gotowy do .encode().
     """
-    from sentence_transformers import SentenceTransformer
+    import torch
 
     if device is None:
-        import torch
         if torch.cuda.is_available():
             device = "cuda"
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = "mps"
         else:
             device = "cpu"
+
+    cache_key = (model_name, device)
+    if cache_key in _MODEL_CACHE:
+        log.info("Embedding model already loaded, reusing: %s on %s", model_name, device)
+        return _MODEL_CACHE[cache_key]
+
+    from sentence_transformers import SentenceTransformer
 
     log.info("Ładowanie modelu: %s  →  urządzenie: %s", model_name, device)
     model = SentenceTransformer(
@@ -141,6 +150,7 @@ def load_model(
     )
     dim = model.get_sentence_embedding_dimension()
     log.info("Model załadowany. Wymiar embeddingu: %d", dim)
+    _MODEL_CACHE[cache_key] = model
     return model
 
 

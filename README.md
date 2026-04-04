@@ -17,7 +17,7 @@ claims_processing/
 ├── gen_agent/                   # 🧩  Shared agent infrastructure (core library)
 │   ├── base_agent.py            #     Abstract BaseAgent class (agent interface)
 │   ├── llm_client.py            #     Universal LLM client factory (Together/Ollama/vLLM/llama.cpp)
-│   ├── bm25.py                  #     Generic BM25 retriever (inverted index, Polish stopwords + stemming)
+│   ├── bm25.py                  #     Generic BM25 retriever (inverted index, Polish stopwords + stemming, _INDEX_CACHE)
 │   ├── rag.py                   #     RAG retriever (BM25 / vector / hybrid + RRF fusion, query cache)
 │   └── react.py                 #     Universal ReAct loop & tool parsing (configurable think-tag stripping)
 │
@@ -27,10 +27,10 @@ claims_processing/
 │   └── polish_wikipedia_webscrapper.py # Scrapes Polish Wikipedia articles via API
 │
 ├── dataprep/                    # 🔧  Data processing & storage
-│   ├── build_wikipedia_db.py    #     Ingests scraped Wikipedia JSON → chunks & vector DB (6-phase pipeline with ETA)
-│   ├── wikipeda_chunking.py     #     Splits Wikipedia articles → sentence-level chunks
-│   ├── wikipedia_embedding.py   #     Embeds chunks with sentence-transformers (CUDA/MPS/CPU)
-│   ├── wikipedia_db.py          #     SQLite + sqlite-vec vector DB for RAG
+│   ├── build_wikipedia_db.py    #     Streaming pipeline: JSONL → chunk → batch-embed → insert (resume-safe, 4 phases)
+│   ├── wikipeda_chunking.py     #     Splits Wikipedia articles → sentence-level chunks (build_article_chunks per article)
+│   ├── wikipedia_embedding.py   #     Embeds chunks with sentence-transformers (CUDA/MPS/CPU); _MODEL_CACHE shares one instance across agents
+│   ├── wikipedia_db.py          #     SQLite + sqlite-vec vector DB; insert_chunk_batch for pre-computed embeddings; WAL mode
 │   ├── demagog_db.py            #     Ingests Demagog fact-checks → SQLite (claims table)
 │   └── am_benchmark_db.py       #     Ingests AM benchmark CSV → SQLite (claims table)
 │
@@ -73,17 +73,18 @@ claims_processing/
 │   ├── results_demagog.db       #     Results DB for Demagog benchmark
 │   └── results_am_benchmark.db  #     Results DB for AM benchmark
 │
-├── tests/                       # 🧪  Integration & hardware tests
-│   ├── tester.py                #     Main test runner — runs all tests below in sequence
-│   ├── test_01_wikipedia_db.py  #     Wikipedia chunking → SQLite pipeline
+├── tests/                       # 🧪  Machine-readiness integration tests (all pass = ready to eval)
+│   ├── tester.py                #     Main test runner — runs all 10 tests in sequence
+│   ├── test_01_wikipedia_db.py  #     Real embedding model load + streaming DB build + knn_search
 │   ├── test_02_demagog_db.py    #     Demagog JSON ingestion & label mapping
 │   ├── test_03_am_benchmark_db.py #   AM Benchmark CSV ingestion
-│   ├── test_04_eval_local.py    #     Local (tiered) eval loop with a dummy agent
-│   ├── test_05_eval_cloud.py    #     Cloud (parallel) eval loop with a dummy agent
+│   ├── test_04_eval_local.py    #     LLM ping + real eval via eval_benchmark_local (SingleAgent, 3 claims)
+│   ├── test_05_eval_cloud.py    #     LLM ping + real eval via eval_benchmark_cloud (parallel, 3 claims)
 │   ├── test_06_cuda_gpu.py      #     NVIDIA CUDA availability & GEMM throughput (GPU machines)
-│   ├── test_07_monitoring.py    #     brrr push monitoring alerts
+│   ├── test_07_monitoring.py    #     brrr webhook config, state management, real HTTP send
 │   ├── test_08_crash_recovery.py #    Crash recovery & resume (sequential + cloud modes)
 │   ├── test_09_bm25_polish.py   #     Polish BM25 tokenizer (stopwords, stemming, retrieval)
+│   ├── test_10_monitoring_progress.py # MonitoringAgent ETA/rate accuracy & large-dataset payload
 │   └── eval_completeness_test.py #    Agent evaluation completeness checker (standalone reporter)
 │
 └── data/                        # 📁  Raw / downloaded datasets
@@ -179,8 +180,8 @@ python datascrap/polish_wikipedia_webscrapper.py
 python data/am_benchmark_loader.py
 
 # --- Step 2: Prepare databases ---
-# Build Wikipedia vector DB (from scraped JSON)
-python dataprep/build_wikipedia_db.py --input polish_wikipedia_articles.json
+# Build Wikipedia vector DB (streaming pipeline, resume-safe)
+python dataprep/build_wikipedia_db.py --input polish_wikipedia_articles.jsonl
 
 # Ingest Demagog fact-checks into SQLite
 python dataprep/demagog_db.py --input data/demagog_wypowiedzi_detailed.json
@@ -198,25 +199,29 @@ python -m eval.eval_loop --mode local
 
 ### 5. Run Integration Tests
 
-Verify the integrity of all pipeline components — DB creation, embedding, agent evaluation, and GPU health:
+The test suite is a **machine-readiness checklist** — all 10 tests passing means the machine is fully configured to run the evaluation pipeline. Tests make real calls: they load the embedding model, ping the LLM backend, and run short eval loops.
+
 ```bash
-# Run the full test suite:
+# Run the full suite (recommended before starting a long eval run):
 python tests/tester.py
 
 # Or run individual tests:
-python tests/test_01_wikipedia_db.py    # Wikipedia chunking pipeline
-python tests/test_02_demagog_db.py      # Demagog JSON ingestion
+python tests/test_01_wikipedia_db.py    # Embedding model load + streaming DB build + knn_search
+python tests/test_02_demagog_db.py      # Demagog JSON ingestion & label mapping
 python tests/test_03_am_benchmark_db.py # AM Benchmark CSV ingestion
-python tests/test_04_eval_local.py      # Local (tiered) eval loop
-python tests/test_05_eval_cloud.py      # Cloud (parallel) eval loop
-python tests/test_06_cuda_gpu.py        # NVIDIA CUDA check (GPU machines only)
-python tests/test_07_monitoring.py      # brrr push monitoring alerts
-python tests/test_08_crash_recovery.py  # Crash recovery & resume
-python tests/test_09_bm25_polish.py     # Polish BM25 tokenizer
+python tests/test_04_eval_local.py      # LLM ping + eval_benchmark_local (real agent, 3 claims)
+python tests/test_05_eval_cloud.py      # LLM ping + eval_benchmark_cloud (parallel, 3 claims)
+python tests/test_06_cuda_gpu.py        # NVIDIA CUDA availability & GEMM throughput
+python tests/test_07_monitoring.py      # brrr webhook, state management, real HTTP send
+python tests/test_08_crash_recovery.py  # Crash recovery & resume (sequential + cloud modes)
+python tests/test_09_bm25_polish.py     # Polish BM25 tokenizer (stopwords, stemming, retrieval)
+python tests/test_10_monitoring_progress.py  # MonitoringAgent ETA/rate accuracy + large-dataset payload
 
 # Check evaluation completeness across all agents:
 python tests/eval_completeness_test.py
 ```
+
+Tests 01, 04, and 05 fail with **actionable error messages** when dependencies or backends are missing (e.g., `sentence-transformers` not installed, Ollama not running, API key wrong).
 
 ---
 
@@ -248,7 +253,7 @@ Common utilities shared by all agents, extracted into a reusable package:
 |--------|---------|
 | `base_agent.py` | Abstract `BaseAgent` class — all agents inherit from this; exposes a `cost_tier` attribute (1/2/3) used for tiered scheduling |
 | `llm_client.py` | Universal LLM client factory — switches between Together.ai, Ollama, vLLM, and llama.cpp via `LLM_BACKEND` env var |
-| `bm25.py` | Generic BM25 (Okapi) retriever with inverted index, memory-optimized for 1.5M+ chunks; Polish stopword filter (120+ tokens) + light suffix stemmer for improved Polish recall |
+| `bm25.py` | Generic BM25 (Okapi) retriever with inverted index, memory-optimized for 1.5M+ chunks; Polish stopword filter (120+ tokens) + light suffix stemmer for improved Polish recall; process-level `_INDEX_CACHE` prevents duplicate 4–6 GB loads when multiple agents share the same DB |
 | `rag.py` | RAG retriever supporting BM25, vector (sqlite-vec k-NN), and hybrid (RRF fusion) modes; two-stage retrieval with structured evidence provenance; in-process embedding cache for repeated queries |
 | `react.py` | Universal ReAct agent loop for robust and model-agnostic tool calling; configurable `<think>`-tag stripping via `STRIP_THINKING_TAGS` env var |
 
@@ -538,30 +543,76 @@ All Python packages are installed automatically by `loader.py`. See `requirement
 
 ## Recent Improvements
 
-### Build pipeline — rich terminal progress
+### Memory — shared BM25 index and embedding model caches
 
-`build_wikipedia_db.py` now runs as an explicit 6-phase pipeline with per-phase timing banners and rich per-batch progress for the insert+embed loop:
+When running all 14 agents in a single process, each BM25-enabled agent previously loaded its own independent copy of the Wikipedia index from `wiki.db`. With a full corpus the BM25 docstring itself notes **4–6 GB per copy**; 8 agents × 6 GB = up to 48 GB — enough to crash an IDE or local machine.
 
+Two process-level caches fix this:
+
+**`gen_agent/bm25.py` — `BM25Index._INDEX_CACHE`**
+
+A class-level dict keyed on `(abs_path, table, text_column)`. The second through Nth call to `BM25Index.from_sqlite("wiki.db")` returns the already-loaded object instead of re-reading and re-indexing. Debug loads (`limit=` set) and custom-tokenizer loads bypass the cache so test code is unaffected.
+
+**`dataprep/wikipedia_embedding.py` — `_MODEL_CACHE`**
+
+A module-level dict keyed on `(model_name, resolved_device)`. If `RAG_MODE=vector` or `hybrid`, four `RAGRetriever` instances would otherwise each call `load_model()` and hold their own ~1.4 GB `sdadas/mmlw-retrieval-roberta-large-v2` copy. Now all four share one instance.
+
+**`dataprep/wikipedia_db.py` — WAL mode**
+
+`init_db()` now sets `PRAGMA journal_mode=WAL`, consistent with the results DB. Prevents write-lock contention on the wiki DB during long eval runs.
+
+---
+
+### Build pipeline — streaming, resume-safe
+
+`build_wikipedia_db.py` is now a **4-phase streaming pipeline** that processes articles one at a time rather than loading all chunks into RAM:
+
+1. Load embedding model (to know `embed_dim` for DB init)
+2. Init SQLite+sqlite-vec DB
+3. Load resume state — `page_id`s already in DB are skipped automatically on restart
+4. Stream JSONL → `build_article_chunks` → batch-embed → `insert_chunk_batch`
+
+This keeps memory usage flat regardless of corpus size and allows interrupted runs to resume from where they left off. Key new flags:
+
+```bash
+# --batch-size: chunks to accumulate before one embed+insert call (default 500)
+# --embed-batch-size: batch size passed to model.encode() — tune for GPU VRAM (default 64)
+python dataprep/build_wikipedia_db.py \
+    --input polish_wikipedia_articles.jsonl \
+    --batch-size 500 \
+    --embed-batch-size 64
 ```
-10:20:00  INFO      ── Phase 1/6: Loading JSONL (polish_wikipedia_articles.jsonl) ...
-10:20:03  INFO      ── Phase 1/6: done in 3.1s — 52,341 articles loaded
-10:20:03  INFO      ── Phase 2/6: Deduplication ...
-10:20:04  INFO      ── Phase 2/6: done in 0.9s — 52,341 unique articles
-10:20:04  INFO      ── Phase 3/6: Parsing 52,341 articles ...
-10:20:04  INFO        [  5000/52341]  10%
-...
-10:22:00  INFO      ── Phase 6/6: Init DB + insert (data/wiki.db, batch=500)
-10:22:05  INFO      [    500/150000]   0.3%  |   83 ch/s  |  elapsed 0m 6s   |  ETA 30m 0s
-10:22:11  INFO      [   1000/150000]   0.7%  |   83 ch/s  |  elapsed 0m 12s  |  ETA 29m 54s
-```
 
-### Monitoring — completion notifications & DB-build context
+`wikipedia_db.py` now exposes `insert_chunk_batch(conn, chunk_embedding_pairs)` for inserting pre-computed `(Chunk, embedding)` pairs in a single transaction — used by the streaming pipeline and available for custom scripts.
 
-`MonitoringAgent` now supports two modes (`eval` and `build_db`) with context-appropriate progress payloads, and fires an immediate "✅ Done" push notification via `report_done()` when any script finishes. All database builders (`demagog_db.py`, `am_benchmark_db.py`, `build_wikipedia_db.py`) and `eval_loop.py` are fully wired.
+### Monitoring — fixes & hardening
+
+- **Silent-drop bug fixed**: `_send()` now accepts HTTP **202 Accepted** (in addition to 200/201/204). brrr returns 202 on success; the old code treated it as failure and dropped every notification silently.
+- **ETA/elapsed accuracy**: `_build_progress_payload` for `build_db` mode now uses `max(wall_clock_since_phase_start, state["elapsed_sec"])` for rate and ETA. Previously, setting a new phase reset the wall-clock to zero, causing ETA and speed to show "0" immediately after a phase transition.
+- **Alert thread tracking**: `report_crash()` and `report_done()` track their background threads; `stop()` joins them so HTTP requests complete before process exit.
+- **Monitoring passthrough into insert**: `insert_chunks_with_embeddings` accepts an optional `mon=` parameter so the caller's already-started agent is used — prevents the old split where `build_wikipedia_db.py` and `wikipedia_db.py` each held a separate singleton and scheduled notifications showed stale state.
+
+### Eval loop — `threading` import fix
+
+`eval_benchmark_cloud` used `threading.Lock()` via an inline `import threading` inside the function body. That inline import was removed during a refactor but `threading` was never promoted to the module-level imports, causing a `NameError: name 'threading' is not defined` on every cloud-mode eval run. Fixed by adding `import threading` to `eval_loop.py`'s top-level imports.
+
+### Tests — machine-readiness suite
+
+All 10 tests now make **real calls** rather than using dummy agents or dummy embeddings:
+
+| Test | What changed |
+|------|-------------|
+| `test_01_wikipedia_db` | Loads real embedding model, builds DB via streaming pipeline, asserts `knn_search` returns the correct article |
+| `test_04_eval_local` | Pings the configured LLM backend, runs `SingleAgent` on 3 Polish claims via `eval_benchmark_local` |
+| `test_05_eval_cloud` | Same but `eval_benchmark_cloud` (parallel), also checks resume/skip logic |
+| `test_07_monitoring` | No mocks — verifies state, payload correctness, and real HTTP send if `BRRR_WEBHOOK_URL` is set |
+| `test_10_monitoring_progress` | New test: ETA/rate accuracy with realistic 1.5M-chunk dataset simulation |
+
+Tests 01, 04, and 05 fail with **actionable messages** when a dependency is missing or a backend is unreachable, making them useful as a pre-eval readiness check.
 
 ### Polish BM25 retriever
 
-`gen_agent/bm25.py` now ships with a 120+ word Polish stopword list and a light suffix stemmer (`_pl_stem`) that normalizes common inflectional endings (e.g. "-ach", "-ami", "-ości", "-ować") so that inflected query forms match corpus tokens more reliably.
+`gen_agent/bm25.py` ships with a 120+ word Polish stopword list and a light suffix stemmer (`_pl_stem`) that normalizes common inflectional endings so inflected query forms match corpus tokens more reliably.
 
 ### RAG embedding cache
 
@@ -569,20 +620,13 @@ All Python packages are installed automatically by `loader.py`. See `requirement
 
 ### Configurable think-tag stripping
 
-`gen_agent/react.py` strips model chain-of-thought tags via a configurable regex. Set `STRIP_THINKING_TAGS=think,reasoning,scratchpad` (default) in `.env` to control which tags are removed from raw model output before tool parsing and answer extraction.
+`gen_agent/react.py` strips model chain-of-thought tags via a configurable regex. Set `STRIP_THINKING_TAGS=think,reasoning,scratchpad` (default) in `.env` to control which tags are removed from raw model output before tool parsing.
 
 ### Adversarial debate hardening
 
 The `uam_ga7` / `dem_ga7` debate agents now:
 - Remove the unused "critic" debater role (dead code eliminated).
 - Wrap each `run_debater()` call in a try/except — a failing debater yields a `NIEWERYFIKOWALNE` fallback instead of crashing the entire claim.
-
-### New tests
-
-| Test | Coverage |
-|------|---------|
-| `test_08_crash_recovery.py` | Eval loop crash + resume in sequential and cloud modes |
-| `test_09_bm25_polish.py` | Polish stopword filtering, suffix stemming, BM25 retrieval on Polish text |
 
 ---
 

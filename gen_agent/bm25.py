@@ -60,6 +60,7 @@ import array
 import heapq
 import logging
 import math
+import os
 import re
 import sqlite3
 from typing import Any, Callable
@@ -219,6 +220,11 @@ class BM25Index:
     k1 : float   (domyślnie 1.5)
     b  : float   (domyślnie 0.75)
     """
+
+    # Process-level cache: (abs_db_path, table, text_column) → BM25Index
+    # Prevents loading multiple copies of the same index when multiple agents
+    # share the same wiki.db. Each copy costs 4–6 GB for a full Wikipedia corpus.
+    _INDEX_CACHE: dict[tuple, "BM25Index"] = {}
 
     def __init__(
         self,
@@ -496,6 +502,17 @@ class BM25Index:
             text_column = cfg["text_column"]
             columns = cfg["columns"]
 
+        # Return cached index if one with the same source already exists.
+        # Multiple agents loading the same wiki.db would otherwise each keep
+        # a separate 4–6 GB copy in memory.
+        cache_key = (os.path.abspath(db_path), table, text_column)
+        if cache_key in cls._INDEX_CACHE and limit is None and tokenize_fn is None:
+            log.info(
+                "BM25Index: reusing cached index for %s / %s (corpus_size=%d)",
+                db_path, table, cls._INDEX_CACHE[cache_key].corpus_size,
+            )
+            return cls._INDEX_CACHE[cache_key]
+
         log.info(
             "Ładowanie z bazy: %s (tabela=%s, text_column=%s)",
             db_path, table, text_column,
@@ -515,13 +532,19 @@ class BM25Index:
 
         log.info("Załadowano %d dokumentów z tabeli '%s'.", len(documents), table)
 
-        return cls(
+        index = cls(
             documents,
             text_field=text_column,
             tokenize_fn=tokenize_fn,
             k1=k1,
             b=b,
         )
+
+        # Cache only for standard (non-debug, non-custom-tokenizer) loads
+        if limit is None and tokenize_fn is None:
+            cls._INDEX_CACHE[cache_key] = index
+
+        return index
 
     # ------------------------------------------------------------------
     # Formatowanie kontekstu dla LLM

@@ -547,7 +547,7 @@ class MonitoringAgent:
                 timeout=10,
                 headers={"Content-Type": "application/json"},
             )
-            if resp.status_code in (200, 201, 204):
+            if resp.status_code in (200, 201, 202, 204):
                 log.info(
                     "[MonitoringAgent] Notification sent OK (%d): '%s'",
                     resp.status_code,

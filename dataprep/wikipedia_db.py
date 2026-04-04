@@ -187,6 +187,7 @@ def init_db(db_path: str, embedding_dim: int = EMBEDDING_DIM) -> sqlite3.Connect
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row  # wygodny dostęp po nazwie kolumny
     conn.isolation_level = None      # autocommit — transakcje zarządzamy ręcznie (BEGIN/COMMIT)
+    conn.execute("PRAGMA journal_mode=WAL")
 
     # --- Ładowanie rozszerzenia sqlite-vec ---
     # TODO: Jeśli sqlite_vec.load() nie działa w Twoim środowisku,
