@@ -74,7 +74,7 @@ claims_processing/
 │   └── results_am_benchmark.db  #     Results DB for AM benchmark
 │
 ├── tests/                       # 🧪  Machine-readiness integration tests (all pass = ready to eval)
-│   ├── tester.py                #     Main test runner — runs all 10 tests in sequence
+│   ├── tester.py                #     Main test runner — runs all 12 tests in sequence
 │   ├── test_01_wikipedia_db.py  #     Real embedding model load + streaming DB build + knn_search
 │   ├── test_02_demagog_db.py    #     Demagog JSON ingestion & label mapping
 │   ├── test_03_am_benchmark_db.py #   AM Benchmark CSV ingestion
@@ -85,6 +85,8 @@ claims_processing/
 │   ├── test_08_crash_recovery.py #    Crash recovery & resume (sequential + cloud modes)
 │   ├── test_09_bm25_polish.py   #     Polish BM25 tokenizer (stopwords, stemming, retrieval)
 │   ├── test_10_monitoring_progress.py # MonitoringAgent ETA/rate accuracy & large-dataset payload
+│   ├── test_10b_bm25_cache.py   #     BM25 _INDEX_CACHE OOM regression (same-object identity check)
+│   ├── test_11_am_agent_config.py #   AM agents: label_original comparison + answer-choices injection
 │   └── eval_completeness_test.py #    Agent evaluation completeness checker (standalone reporter)
 │
 └── data/                        # 📁  Raw / downloaded datasets
@@ -150,8 +152,9 @@ Create a `.env` file in the project root:
 # Cloud (Together.ai):
 together_api_key=your_together_ai_key_here
 
-# Paths to databases (required for RAG and BM25 tests):
-BM25_WIKI_DB=dataprep/wiki.db
+# Paths to databases (required for RAG and BM25 agents):
+BM25_WIKI_DB=data/wiki.db
+RAG_WIKI_DB=data/wiki.db
 
 # Monitoring (brrr push notifications):
 MONITORING_ACTIVE=true
@@ -199,23 +202,25 @@ python -m eval.eval_loop --mode local
 
 ### 5. Run Integration Tests
 
-The test suite is a **machine-readiness checklist** — all 10 tests passing means the machine is fully configured to run the evaluation pipeline. Tests make real calls: they load the embedding model, ping the LLM backend, and run short eval loops.
+The test suite is a **machine-readiness checklist** — all 12 tests passing means the machine is fully configured to run the evaluation pipeline. Tests make real calls: they load the embedding model, ping the LLM backend, and run short eval loops.
 
 ```bash
 # Run the full suite (recommended before starting a long eval run):
 python tests/tester.py
 
 # Or run individual tests:
-python tests/test_01_wikipedia_db.py    # Embedding model load + streaming DB build + knn_search
-python tests/test_02_demagog_db.py      # Demagog JSON ingestion & label mapping
-python tests/test_03_am_benchmark_db.py # AM Benchmark CSV ingestion
-python tests/test_04_eval_local.py      # LLM ping + eval_benchmark_local (real agent, 3 claims)
-python tests/test_05_eval_cloud.py      # LLM ping + eval_benchmark_cloud (parallel, 3 claims)
-python tests/test_06_cuda_gpu.py        # NVIDIA CUDA availability & GEMM throughput
-python tests/test_07_monitoring.py      # brrr webhook, state management, real HTTP send
-python tests/test_08_crash_recovery.py  # Crash recovery & resume (sequential + cloud modes)
-python tests/test_09_bm25_polish.py     # Polish BM25 tokenizer (stopwords, stemming, retrieval)
-python tests/test_10_monitoring_progress.py  # MonitoringAgent ETA/rate accuracy + large-dataset payload
+python tests/test_01_wikipedia_db.py     # Embedding model load + streaming DB build + knn_search
+python tests/test_02_demagog_db.py       # Demagog JSON ingestion & label mapping
+python tests/test_03_am_benchmark_db.py  # AM Benchmark CSV ingestion
+python tests/test_04_eval_local.py       # LLM ping + eval_benchmark_local (real agent, 3 claims)
+python tests/test_05_eval_cloud.py       # LLM ping + eval_benchmark_cloud (parallel, 3 claims)
+python tests/test_06_cuda_gpu.py         # NVIDIA CUDA availability & GEMM throughput
+python tests/test_07_monitoring.py       # brrr webhook, state management, real HTTP send
+python tests/test_08_crash_recovery.py   # Crash recovery & resume (sequential + cloud modes)
+python tests/test_09_bm25_polish.py      # Polish BM25 tokenizer (stopwords, stemming, retrieval)
+python tests/test_10_monitoring_progress.py   # MonitoringAgent ETA/rate accuracy + large-dataset payload
+python tests/test_10b_bm25_cache.py      # BM25 cache OOM regression (same-object identity, no-cache for debug loads)
+python tests/test_11_am_agent_config.py  # AM agents: label comparison + answer-choices injection (mocked LLM)
 
 # Check evaluation completeness across all agents:
 python tests/eval_completeness_test.py
@@ -251,8 +256,8 @@ Common utilities shared by all agents, extracted into a reusable package:
 
 | Module | Purpose |
 |--------|---------|
-| `base_agent.py` | Abstract `BaseAgent` class — all agents inherit from this; exposes a `cost_tier` attribute (1/2/3) used for tiered scheduling |
-| `llm_client.py` | Universal LLM client factory — switches between Together.ai, Ollama, vLLM, and llama.cpp via `LLM_BACKEND` env var |
+| `base_agent.py` | Abstract `BaseAgent` class — all agents inherit from this; exposes `cost_tier` (1/2/3) for tiered scheduling and `model_name` for multi-model tracking |
+| `llm_client.py` | Universal LLM client factory — switches between Together.ai, Ollama, vLLM, and llama.cpp via `LLM_BACKEND` env var; `make_client(model)` creates per-agent override clients |
 | `bm25.py` | Generic BM25 (Okapi) retriever with inverted index, memory-optimized for 1.5M+ chunks; Polish stopword filter (120+ tokens) + light suffix stemmer for improved Polish recall; process-level `_INDEX_CACHE` prevents duplicate 4–6 GB loads when multiple agents share the same DB |
 | `rag.py` | RAG retriever supporting BM25, vector (sqlite-vec k-NN), and hybrid (RRF fusion) modes; two-stage retrieval with structured evidence provenance; in-process embedding cache for repeated queries |
 | `react.py` | Universal ReAct agent loop for robust and model-agnostic tool calling; configurable `<think>`-tag stripping via `STRIP_THINKING_TAGS` env var |
@@ -290,8 +295,13 @@ python -m scripts.run_eval_am_benchmark
 
 # --- With options ---
 python -m scripts.run_eval_demagog --limit 10          # first 10 claims only
-python -m scripts.run_eval_am_benchmark --agents uam_ga1,uam_ga2
+python -m scripts.run_eval_am_benchmark --agents uam_ga5,uam_ga4
 python -m eval.eval_loop --benchmarks demagog --clear   # clear old results first
+
+# --- Multi-model: run all agents with each model, results stored side-by-side ---
+python -m scripts.run_eval_am_benchmark --models bielik-11b,llama3.1:8b
+python -m scripts.run_eval_am_benchmark --limit 50 --models bielik-11b,llama3.1:8b
+python -m scripts.run_eval_demagog --models bielik-11b,llama3.1:8b
 
 # --- Export results to CSV ---
 python -m eval.eval_loop --mode cloud --export-csv results/run.csv
@@ -325,10 +335,10 @@ Each results DB contains an `agent_results` table with columns:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `agent_name` | TEXT | Name of the agent |
+| `agent_name` | TEXT | Name of the agent (includes model suffix when `--models` is used) |
 | `claim_id` | INTEGER | ID of the evaluated claim |
 | `benchmark_name`| TEXT | Benchmark name (`demagog` / `am_benchmark`) |
-| `original_label`| TEXT | Ground-truth label |
+| `original_label`| TEXT | Ground-truth label (`label_original` for AM benchmark — answer index `"0"`–`"3"`; normalized label for Demagog) |
 | `model_label` | TEXT | Agent's prediction |
 | `is_correct` | INTEGER | 1 = correct, 0 = incorrect |
 | `total_tokens` | INTEGER | Total tokens used |
@@ -336,6 +346,7 @@ Each results DB contains an `agent_results` table with columns:
 | `completion_tokens` | INTEGER | Completion tokens |
 | `time_thought` | REAL | Wall-clock seconds |
 | `raw_output` | TEXT | Full agent response |
+| `model_name` | TEXT | LLM model used by this agent (empty string = global `LLM_MODEL` from `.env`) |
 | `created_at` | TEXT | ISO timestamp |
 
 Results are **appended** by default.
@@ -402,15 +413,19 @@ class MyAgent(BaseAgent):
 
     def eval(self, claim: dict) -> dict:
         # Your logic here — call LLM, RAG, etc.
+        # For AM benchmark: use label_original (answer index "0"–"3"), not label (always "SUPPORTS")
+        ground_truth = claim.get("label_original") or claim.get("label", "")
+        prediction = "2"  # example: model outputs an answer index
         return {
-            "model_label": "SUPPORTS",
-            "original_label": claim["label"],
-            "is_correct": claim["label"] == "SUPPORTS",
+            "model_label": prediction,
+            "original_label": ground_truth,
+            "is_correct": prediction == ground_truth,
             "total_tokens": 150,
             "prompt_tokens": 100,
             "completion_tokens": 50,
             "time_thought": 1.23,
             "raw_output": "Full model response...",
+            "model_name": self.model_name or "",
         }
 ```
 
@@ -510,8 +525,9 @@ Example `.env` configurations:
 LLM_BACKEND=together
 together_api_key=your_key
 
-# Database paths (required for RAG agents):
-BM25_WIKI_DB=dataprep/wiki.db
+# Database paths (required for RAG and BM25 agents):
+BM25_WIKI_DB=data/wiki.db
+RAG_WIKI_DB=data/wiki.db
 
 # Ollama (local, Bielik):
 LLM_BACKEND=ollama
@@ -542,6 +558,58 @@ All Python packages are installed automatically by `loader.py`. See `requirement
 ---
 
 ## Recent Improvements
+
+### AM Benchmark agents — two critical evaluation bugs fixed
+
+**Bug 1: 100% wrong predictions (label field mismatch)**
+
+All `agents_uam/` agents were comparing their prediction against `claim["label"]`, which `am_benchmark_db.py` normalizes to `"SUPPORTS"` for every entry. Agents output an answer index (`"0"`, `"1"`, `"2"`, `"3"`), so `"2" == "SUPPORTS"` was always `False` — yielding 0% accuracy regardless of prediction quality.
+
+Fix: agents now use `claim.get("label_original", "") or claim.get("label", "")`. For AM benchmark, `label_original` holds the correct answer index; for Demagog, `label_original` is empty so `label` is used as a fallback (no change there).
+
+**Bug 2: Answer choices never passed to the LLM**
+
+The AM benchmark stores four answer options in `claim["metadata"]["answers"]` as a JSON-encoded Python list. Agents only received `claim_text` (the question), so the LLM was asked to output `0`/`1`/`2`/`3` without knowing what those options referred to.
+
+Fix: a `_build_question_with_answers()` helper was added to each `agents_uam/` agent. It parses `claim["metadata"]`, extracts the four answers, and appends them to the question string before calling the pipeline:
+
+```
+Jakie jest pytanie testowe?
+
+Odpowiedzi:
+0: Opcja A
+1: Opcja B
+2: Opcja C
+3: Opcja D
+```
+
+Both fixes are covered by `tests/test_11_am_agent_config.py` (mocked LLM, no external services required).
+
+---
+
+### Multi-model evaluation — `--models` flag and per-agent override
+
+It is now possible to run the same set of agents with multiple LLM models in a single command. Both benchmark scripts support this:
+
+```bash
+python -m scripts.run_eval_am_benchmark --models bielik-11b,llama3.1:8b
+python -m scripts.run_eval_demagog --models bielik-11b,llama3.1:8b
+```
+
+This registers one variant of each agent per model (e.g., `uam_ga5__bielik-11b`, `dem_ga5__llama3.1-8b`). Results for all model variants land in the same results DB, differentiated by `agent_name` and the `model_name` column.
+
+Under the hood:
+- `gen_agent/llm_client.py` exports `make_client(model, backend, base_url)` — creates a fresh client for any model without touching global state.
+- Every agent in both `agents_uam/` and `agents_dem/` accepts an optional `model_override` constructor parameter. When set, the agent patches its module's `client`/`model` globals inside `eval()` and restores them afterward (safe in sequential local mode).
+- `eval/eval_loop.py` adds a `model_name TEXT DEFAULT ''` column to `agent_results`. Existing databases are auto-migrated on first open.
+
+### Demagog agents — fully registered
+
+All 7 `agents_dem/` agents (`dem_ga1`–`dem_ga7`) are now registered by default in `scripts/run_eval_demagog.py`. The script now supports the same full option set as the AM benchmark wrapper: `--models`, `--mode`, `--workers`, `--tier2-limit`, `--tier3-limit`.
+
+The `agents_dem/single_bm25.py` env var was also corrected (`WIKI_BM25_DB` → `BM25_WIKI_DB`, matching the standard used by all other BM25 agents).
+
+---
 
 ### Memory — shared BM25 index and embedding model caches
 

@@ -64,18 +64,25 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # gdy będą gotowi do ewaluacji.
 
 
-def _register_default_agents() -> None:
-    """Rejestruje domyślnych agentów dla benchmarku Demagog.
+def _register_default_agents(models: list[str] | None = None) -> None:
+    from eval.eval_loop import register_agent
+    from agents_dem.single import SingleAgent
+    from agents_dem.single_web import SingleWebAgent
+    from agents_dem.single_bm25 import SingleBM25Agent
+    from agents_dem.bm25_claim_decomp import ClaimDecompBM25Agent
+    from agents_dem.rag_claim_decomp import ClaimDecompRAGAgent
+    from agents_dem.fewshot_cot_rag import FewShotCoTAgent
+    from agents_dem.fewshot_cot_debate_rag import DebateCoTAgent
 
-    Dodaj tutaj importy i rejestracje agentów dedykowanych
-    dla Demagog, np.:
-
-        from eval.eval_loop import register_agent
-        from agents_dem.some_agent import SomeAgent
-        register_agent(SomeAgent())
-    """
-    # TODO: Zarejestruj agentów, gdy będą gotowi.
-    pass
+    model_list = models or [None]  # None = use global MODEL from .env
+    for model_override in model_list:
+        register_agent(SingleAgent(model_override=model_override))            # dem_ga1  tier 1
+        register_agent(SingleWebAgent(model_override=model_override))         # dem_ga2  tier 1
+        register_agent(SingleBM25Agent(model_override=model_override))        # dem_ga3  tier 1
+        register_agent(ClaimDecompBM25Agent(model_override=model_override))   # dem_ga5  tier 2
+        register_agent(ClaimDecompRAGAgent(model_override=model_override))    # dem_ga4  tier 2
+        register_agent(FewShotCoTAgent(model_override=model_override))        # dem_ga6  tier 3
+        register_agent(DebateCoTAgent(model_override=model_override))         # dem_ga7  tier 3
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +115,52 @@ def main() -> None:
         action="store_true",
         help="Wyczyść poprzednie wyniki przed uruchomieniem.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["local", "cloud", "sequential"],
+        default="local",
+        help="Tryb ewaluacji: local (tiered), cloud (parallel), sequential (default).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=5,
+        help="Liczba równoległych workerów (tylko --mode cloud).",
+    )
+    parser.add_argument(
+        "--models",
+        type=str,
+        default=None,
+        help=(
+            "Nazwy modeli oddzielone przecinkami. Tworzy wariant każdego agenta "
+            "dla każdego modelu. Np. --models bielik-11b,llama3.1:8b. "
+            "Domyślnie: globalny LLM_MODEL z .env."
+        ),
+    )
+    parser.add_argument(
+        "--tier2-limit",
+        type=int,
+        default=20000,
+        help="Maks. liczba claimów dla agentów tier 2 (tylko --mode local).",
+    )
+    parser.add_argument(
+        "--tier3-limit",
+        type=int,
+        default=20000,
+        help="Maks. liczba claimów dla agentów tier 3 (tylko --mode local).",
+    )
     args = parser.parse_args()
 
-    from eval.eval_loop import eval_benchmark, get_registered_agents
+    from eval.eval_loop import (
+        eval_benchmark,
+        eval_benchmark_cloud,
+        eval_benchmark_local,
+        get_registered_agents,
+    )
 
     # Rejestracja agentów
-    _register_default_agents()
+    models_list = [m.strip() for m in args.models.split(",")] if args.models else None
+    _register_default_agents(models=models_list)
 
     agents = get_registered_agents()
 
@@ -133,14 +180,36 @@ def main() -> None:
     log.info("Output DB: %s", RESULTS_DB_PATH)
     log.info("Agenci:    %s", ", ".join(a.name for a in agents))
 
-    eval_benchmark(
-        benchmark_name=BENCHMARK_NAME,
-        input_db_path=INPUT_DB_PATH,
-        results_db_path=RESULTS_DB_PATH,
-        agents=agents,
-        limit=args.limit,
-        clear=args.clear,
-    )
+    if args.mode == "local":
+        eval_benchmark_local(
+            benchmark_name=BENCHMARK_NAME,
+            input_db_path=INPUT_DB_PATH,
+            results_db_path=RESULTS_DB_PATH,
+            agents=agents,
+            limit=args.limit,
+            clear=args.clear,
+            tier2_limit=args.tier2_limit,
+            tier3_limit=args.tier3_limit,
+        )
+    elif args.mode == "cloud":
+        eval_benchmark_cloud(
+            benchmark_name=BENCHMARK_NAME,
+            input_db_path=INPUT_DB_PATH,
+            results_db_path=RESULTS_DB_PATH,
+            agents=agents,
+            limit=args.limit,
+            clear=args.clear,
+            workers=args.workers,
+        )
+    else:
+        eval_benchmark(
+            benchmark_name=BENCHMARK_NAME,
+            input_db_path=INPUT_DB_PATH,
+            results_db_path=RESULTS_DB_PATH,
+            agents=agents,
+            limit=args.limit,
+            clear=args.clear,
+        )
 
     log.info("Ewaluacja Demagog zakończona.")
 

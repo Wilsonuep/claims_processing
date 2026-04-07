@@ -9,4 +9,5 @@ results/
 *.jsonl
 *.db
 wiki.db-journal
+
 .claude/

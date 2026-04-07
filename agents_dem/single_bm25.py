@@ -26,7 +26,7 @@ _bm25_index: BM25Index | None = None
 def _get_bm25() -> BM25Index:
     global _bm25_index
     if _bm25_index is None:
-        db_path = os.getenv("WIKI_BM25_DB", _WIKI_DB_PATH)
+        db_path = os.getenv("BM25_WIKI_DB", _WIKI_DB_PATH)
         _bm25_index = BM25Index.from_sqlite(db_path)
     return _bm25_index
 
@@ -55,7 +55,7 @@ def ask(question: str) -> dict:
         user_content = question
 
     response = client.chat.completions.create(
-        model=AGENT_CONFIG["model"],
+        model=model,
         messages=[
             {"role": "system", "content": AGENT_CONFIG["system_prompt"]},
             {"role": "user", "content": json.dumps({"statement": user_content}, ensure_ascii=False)},
@@ -73,13 +73,39 @@ def ask(question: str) -> dict:
 
 class SingleBM25Agent(BaseAgent):
     name = AGENT_CONFIG["name"]
+    cost_tier = 1
+
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            self._override_client, self._override_model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"{AGENT_CONFIG['name']}__{suffix}"
+            self.model_name = model_override
+        else:
+            self._override_client = None
+            self._override_model = None
+            self.model_name = _DEFAULT_MODEL
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
+        if self._override_client is not None:
+            import agents_dem.single_bm25 as _m
+            _orig_client, _orig_model = _m.client, _m.model
+            _m.client = self._override_client
+            _m.model = self._override_model
+            try:
+                return self._eval_inner(claim)
+            finally:
+                _m.client = _orig_client
+                _m.model = _orig_model
+        return self._eval_inner(claim)
+
+    def _eval_inner(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")
         original_label = claim.get("label", "")
-        
+
         t0 = time.perf_counter()
-        
+
         try:
             result = ask(claim_text)
             parsed_answer = json.loads(result["answer"])
@@ -96,10 +122,11 @@ class SingleBM25Agent(BaseAgent):
                 "completion_tokens": 0,
                 "time_thought": elapsed,
                 "raw_output": f"ERROR: {exc}",
+                "model_name": self.model_name or "",
             }
-            
+
         elapsed = time.perf_counter() - t0
-        
+
         return {
             "model_label": model_label,
             "original_label": original_label,
@@ -109,4 +136,5 @@ class SingleBM25Agent(BaseAgent):
             "completion_tokens": result["completion_tokens"],
             "time_thought": elapsed,
             "raw_output": result["answer"],
+            "model_name": self.model_name or "",
         }

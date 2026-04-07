@@ -74,26 +74,36 @@ REACT_SYSTEM_PROMPT = FACTCHECK_PROMPT + "\n\n" + REACT_INSTRUCTION
 
 class SingleWebAgent(BaseAgent):
     name = "dem_ga2"
+    cost_tier = 1
+
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            _, self._model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"dem_ga2__{suffix}"
+            self.model_name = model_override
+        else:
+            self._model = MODEL
+            self.model_name = _DEFAULT_MODEL
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")
         original_label = claim.get("label", "")
-        
+
         t0 = time.perf_counter()
-        
+
         try:
             result = run_react_agent(
-                model=MODEL,
+                model=self._model,
                 system_prompt=REACT_SYSTEM_PROMPT,
                 user_query=claim_text,
                 available_tools=REACT_TOOLS,
                 max_steps=5
             )
             model_label = result.get("label", "ERROR")
-            # In result, reasoning is returned, but we mapped justification to reasoning optionally
-            # Let's stringify the trajectory to be saved in raw_output
             raw_trajectory = json.dumps(result.get("trajectory", []), ensure_ascii=False)
-            
+
         except Exception as exc:
             log.error("Błąd agenta: %s", exc)
             elapsed = time.perf_counter() - t0
@@ -106,10 +116,11 @@ class SingleWebAgent(BaseAgent):
                 "completion_tokens": 0,
                 "time_thought": elapsed,
                 "raw_output": f"ERROR: {exc}",
+                "model_name": self.model_name or "",
             }
-            
+
         elapsed = time.perf_counter() - t0
-        
+
         return {
             "model_label": model_label,
             "original_label": original_label,
@@ -119,4 +130,5 @@ class SingleWebAgent(BaseAgent):
             "completion_tokens": result.get("completion_tokens", 0),
             "time_thought": elapsed,
             "raw_output": raw_trajectory,
+            "model_name": self.model_name or "",
         }

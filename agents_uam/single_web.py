@@ -66,16 +66,28 @@ Jeśli twój model używa tagów <think> (np DeepSeek), wstaw blok json na zewn�
 
 class SingleWebAgent(BaseAgent):
     name = "uam_ga2"
+    cost_tier = 1
+
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            _, self._model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"uam_ga2__{suffix}"
+            self.model_name = model_override
+        else:
+            self._model = MODEL
+            self.model_name = _DEFAULT_MODEL
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")
-        original_label = claim.get("label", "")
-        
+        original_label = claim.get("label_original", "") or claim.get("label", "")
+
         t0 = time.perf_counter()
-        
+
         try:
             result = run_react_agent(
-                model=MODEL,
+                model=self._model,
                 system_prompt=SYSTEM_PROMPT,
                 user_query=claim_text,
                 available_tools=REACT_TOOLS,
@@ -83,7 +95,7 @@ class SingleWebAgent(BaseAgent):
             )
             model_label = result.get("label", "ERROR")
             raw_trajectory = json.dumps(result.get("trajectory", []), ensure_ascii=False)
-            
+
         except Exception as exc:
             log.error("Błąd agenta: %s", exc)
             elapsed = time.perf_counter() - t0
@@ -96,11 +108,10 @@ class SingleWebAgent(BaseAgent):
                 "completion_tokens": 0,
                 "time_thought": elapsed,
                 "raw_output": f"ERROR: {exc}",
+                "model_name": self.model_name or "",
             }
-            
+
         elapsed = time.perf_counter() - t0
-        
-        # In numerical models like AM_benchmark, equality of string casting suffices
         return {
             "model_label": str(model_label),
             "original_label": str(original_label),
@@ -110,4 +121,5 @@ class SingleWebAgent(BaseAgent):
             "completion_tokens": result.get("completion_tokens", 0),
             "time_thought": elapsed,
             "raw_output": raw_trajectory,
+            "model_name": self.model_name or "",
         }

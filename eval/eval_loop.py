@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS agent_results (
     completion_tokens INTEGER NOT NULL,
     time_thought      REAL    NOT NULL,
     raw_output        TEXT,
+    model_name        TEXT    NOT NULL DEFAULT '',
     created_at        TEXT    NOT NULL
 );
 """
@@ -237,8 +238,18 @@ def init_results_db(db_path: str) -> sqlite3.Connection:
     cur.execute(_CREATE_AGENT_RESULTS_SQL)
     cur.execute(_CREATE_IDX_AGENT_NAME)
     cur.execute(_CREATE_IDX_CLAIM_ID)
-    conn.commit()
 
+    # Migration: add model_name column if it does not exist yet (for existing DBs)
+    try:
+        conn.execute(
+            "ALTER TABLE agent_results ADD COLUMN model_name TEXT NOT NULL DEFAULT ''"
+        )
+        conn.commit()
+        log.info("Migracja: dodano kolumnę model_name do agent_results.")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+    conn.commit()
     log.info("Baza wyników gotowa: %s", db_path)
     return conn
 
@@ -301,8 +312,8 @@ def insert_result(
         INSERT INTO agent_results
             (agent_name, claim_id, benchmark_name, original_label,
              model_label, is_correct, total_tokens, prompt_tokens,
-             completion_tokens, time_thought, raw_output, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             completion_tokens, time_thought, raw_output, model_name, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent_name,
@@ -316,6 +327,7 @@ def insert_result(
             int(result["completion_tokens"]),
             float(result["time_thought"]),
             result.get("raw_output", ""),
+            result.get("model_name", ""),
             now_iso,
         ),
     )

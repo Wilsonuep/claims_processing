@@ -11,6 +11,8 @@ from test_07_monitoring import test_monitoring
 from test_08_crash_recovery import test_crash_recovery
 from test_09_bm25_polish import test_bm25_polish
 from test_10_monitoring_progress import test_monitoring_progress
+from test_10b_bm25_cache import test_bm25_cache
+from test_11_am_agent_config import test_am_agent_config
 
 def run_tests():
     print("=" * 60)
@@ -28,6 +30,8 @@ def run_tests():
         ("Crash recovery i resume pętli ewaluacyjnej", test_crash_recovery),
         ("BM25 tokenizer — polska morfologia i stopwords", test_bm25_polish),
         ("Monitoring — dokładność progressu i ETA (live payload check)", test_monitoring_progress),
+        ("BM25 index cache — OOM regression (jeden obiekt na proces)", test_bm25_cache),
+        ("AM Benchmark agenci — konfiguracja label i odpowiedzi", test_am_agent_config),
     ]
     
     all_passed = True

@@ -55,10 +55,13 @@ class BaseAgent(ABC):
     --------
     name : str
         Unikalna nazwa agenta — używana w logach i tabeli wyników.
+    model_name : str | None
+        Nazwa modelu LLM używanego przez agenta. None = globalny MODEL z .env.
     """
 
     name: str
     cost_tier: int = 2  # 1=fast (≤1 LLM call), 2=moderate (2 calls), 3=expensive (4+ calls)
+    model_name: str | None = None
 
     @abstractmethod
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:

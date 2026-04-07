@@ -330,6 +330,34 @@ def _extract_label(answer: str) -> str:
     return stripped
 
 
+def _build_question_with_answers(claim_text: str, claim: dict) -> str:
+    """Buduje tekst pytania z dołączonymi odpowiedziami z metadanych (AM benchmark).
+
+    Jeśli metadata nie zawiera listy odpowiedzi, zwraca sam claim_text.
+    """
+    import ast
+    import json as _json
+    raw_meta = claim.get("metadata") or ""
+    if not raw_meta:
+        return claim_text
+    try:
+        meta = _json.loads(raw_meta)
+    except Exception:
+        return claim_text
+
+    raw_answers = meta.get("answers", "")
+    try:
+        answers_list = ast.literal_eval(raw_answers) if isinstance(raw_answers, str) else raw_answers
+    except Exception:
+        answers_list = []
+
+    if not answers_list or len(answers_list) != 4:
+        return claim_text
+
+    answers_block = "\n".join(f"{i}: {a}" for i, a in enumerate(answers_list))
+    return f"{claim_text}\n\nOdpowiedzi:\n{answers_block}"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # AGENT 1: DECOMPOSER
 # ═══════════════════════════════════════════════════════════════════════════
@@ -951,8 +979,34 @@ class FewShotCoTAgent(BaseAgent):
     """
 
     name = AGENT_CONFIG["name"]
+    cost_tier = 3
+
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            self._override_client, self._override_model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"{AGENT_CONFIG['name']}__{suffix}"
+            self.model_name = model_override
+        else:
+            self._override_client = None
+            self._override_model = None
+            self.model_name = _DEFAULT_MODEL
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
+        if self._override_client is not None:
+            import agents_uam.fewshot_cot_rag as _m
+            _orig_client, _orig_model = _m.client, _m.MODEL
+            _m.client = self._override_client
+            _m.MODEL = self._override_model
+            try:
+                return self._eval_inner(claim)
+            finally:
+                _m.client = _orig_client
+                _m.MODEL = _orig_model
+        return self._eval_inner(claim)
+
+    def _eval_inner(self, claim: dict[str, Any]) -> dict[str, Any]:
         """Ewaluacja pojedynczego twierdzenia.
 
         Parametry
@@ -970,12 +1024,15 @@ class FewShotCoTAgent(BaseAgent):
                 time_thought, raw_output
         """
         claim_text = claim.get("claim_text", "")
-        original_label = claim.get("label", "")
+        original_label = claim.get("label_original", "") or claim.get("label", "")
 
         t0 = time.perf_counter()
 
+        # Build question with answer choices from metadata (AM benchmark)
+        question_with_answers = _build_question_with_answers(claim_text, claim)
+
         try:
-            result = ask(claim_text)
+            result = ask(question_with_answers)
         except Exception as exc:
             log.error("Pipeline error: %s", exc, exc_info=True)
             elapsed = time.perf_counter() - t0
@@ -988,6 +1045,7 @@ class FewShotCoTAgent(BaseAgent):
                 "completion_tokens": 0,
                 "time_thought": elapsed,
                 "raw_output": f"ERROR: {exc}",
+                "model_name": self.model_name or "",
             }
 
         elapsed = time.perf_counter() - t0
@@ -1015,4 +1073,5 @@ class FewShotCoTAgent(BaseAgent):
             "completion_tokens": result["completion_tokens"],
             "time_thought": elapsed,
             "raw_output": raw_output,
+            "model_name": self.model_name or "",
         }

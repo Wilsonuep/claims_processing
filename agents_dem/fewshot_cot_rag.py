@@ -266,8 +266,34 @@ AGENT_CONFIG = {
 
 class FewShotCoTAgent(BaseAgent):
     name = AGENT_CONFIG["name"]
+    cost_tier = 3
+
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            self._override_client, self._override_model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"{AGENT_CONFIG['name']}__{suffix}"
+            self.model_name = model_override
+        else:
+            self._override_client = None
+            self._override_model = None
+            self.model_name = _DEFAULT_MODEL
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
+        if self._override_client is not None:
+            import agents_dem.fewshot_cot_rag as _m
+            _orig_client, _orig_model = _m.client, _m.model
+            _m.client = self._override_client
+            _m.model = self._override_model
+            try:
+                return self._eval_inner(claim)
+            finally:
+                _m.client = _orig_client
+                _m.model = _orig_model
+        return self._eval_inner(claim)
+
+    def _eval_inner(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")
         original_label = claim.get("label", "")
         t0 = time.perf_counter()
@@ -278,7 +304,7 @@ class FewShotCoTAgent(BaseAgent):
             reasoner_outputs, t2, p2, c2 = run_reasoners(claim_text, evidence)
             final_json, raw_judge, t3, p3, c3 = consolidate(claim_text, reasoner_outputs, evidence)
             model_label = final_json.get("label", "ERROR")
-            
+
             total_tokens = t1 + t2 + t3
             prompt_tokens = p1 + p2 + p3
             completion_tokens = c1 + c2 + c3
@@ -286,7 +312,9 @@ class FewShotCoTAgent(BaseAgent):
             log.error("Pipeline error: %s", exc)
             return {
                 "model_label": "ERROR", "original_label": original_label, "is_correct": False,
-                "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0, "time_thought": time.perf_counter()-t0, "raw_output": f"ERROR: {exc}"
+                "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                "time_thought": time.perf_counter() - t0, "raw_output": f"ERROR: {exc}",
+                "model_name": self.model_name or "",
             }
 
         elapsed = time.perf_counter() - t0
@@ -304,4 +332,5 @@ class FewShotCoTAgent(BaseAgent):
             "completion_tokens": completion_tokens,
             "time_thought": elapsed,
             "raw_output": raw_output_dump,
+            "model_name": self.model_name or "",
         }

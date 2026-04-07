@@ -152,7 +152,32 @@ class DebateCoTAgent(BaseAgent):
     name = AGENT_CONFIG["name"]
     cost_tier = 3  # 7-8 LLM calls per claim
 
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            self._override_client, self._override_model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"{AGENT_CONFIG['name']}__{suffix}"
+            self.model_name = model_override
+        else:
+            self._override_client = None
+            self._override_model = None
+            self.model_name = _DEFAULT_MODEL
+
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
+        if self._override_client is not None:
+            import agents_dem.fewshot_cot_rag as _m
+            _orig_client, _orig_model = _m.client, _m.model
+            _m.client = self._override_client
+            _m.model = self._override_model
+            try:
+                return self._eval_inner(claim)
+            finally:
+                _m.client = _orig_client
+                _m.model = _orig_model
+        return self._eval_inner(claim)
+
+    def _eval_inner(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")
         original_label = claim.get("label", "")
         t0 = time.perf_counter()
@@ -162,14 +187,19 @@ class DebateCoTAgent(BaseAgent):
             evidence = retrieve_evidence(sub_claims)
             deb_res, t3, p3, c3 = run_debate_rounds(claim_text, sub_claims, evidence)
             final_json, raw_judge, t4, p4, c4 = judge_debate(claim_text, evidence, deb_res["transcript"], deb_res["final_labels"])
-            
+
             tot = t1 + t3 + t4
             prm = p1 + p3 + p4
             cmp = c1 + c3 + c4
             model_label = final_json.get("label", "ERROR")
         except Exception as exc:
             log.error("Debate error: %s", exc)
-            return {"model_label": "ERROR", "original_label": original_label, "is_correct": False, "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0, "time_thought": time.perf_counter()-t0, "raw_output": f"ERROR: {exc}"}
+            return {
+                "model_label": "ERROR", "original_label": original_label, "is_correct": False,
+                "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                "time_thought": time.perf_counter() - t0, "raw_output": f"ERROR: {exc}",
+                "model_name": self.model_name or "",
+            }
 
         elapsed = time.perf_counter() - t0
         raw_output_dump = json.dumps({
@@ -186,4 +216,5 @@ class DebateCoTAgent(BaseAgent):
             "completion_tokens": cmp,
             "time_thought": elapsed,
             "raw_output": raw_output_dump,
+            "model_name": self.model_name or "",
         }
