@@ -11,9 +11,12 @@ from gen_agent.react import run_react_agent
 from agents_dem.prompts import FACTCHECK_PROMPT
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
 except ImportError:
-    DDGS = None
+    try:
+        from duckduckgo_search import DDGS  # legacy fallback
+    except ImportError:
+        DDGS = None
 
 load_dotenv()
 
