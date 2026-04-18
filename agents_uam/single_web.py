@@ -10,9 +10,12 @@ from gen_agent.base_agent import BaseAgent
 from gen_agent.react import run_react_agent
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
 except ImportError:
-    DDGS = None
+    try:
+        from duckduckgo_search import DDGS  # legacy fallback
+    except ImportError:
+        DDGS = None
 
 load_dotenv()
 

@@ -142,26 +142,44 @@ Output: Podaj TYLKO numer odpowiedzi: 0, 1, 2 lub 3.
 # Agent 1: DECOMPOSER — rozbija twierdzenie na pod-twierdzenia
 # ---------------------------------------------------------------------------
 
+_CALL_LLM_RETRIES = 5
+_CALL_LLM_BACKOFF = [5, 10, 20, 40, 60]  # seconds between retries
+
+
 def _call_llm(
     system_prompt: str,
     user_content: str,
 ) -> tuple[str, int, int, int]:
     """Wywołuje LLM i zwraca (odpowiedź, total_tokens, prompt_tokens, completion_tokens)."""
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-    )
-    choice = response.choices[0]
-    usage = response.usage
-    return (
-        choice.message.content.strip(),
-        usage.total_tokens if usage else 0,
-        usage.prompt_tokens if usage else 0,
-        usage.completion_tokens if usage else 0,
-    )
+    import time as _time
+
+    last_exc: Exception | None = None
+    for attempt in range(_CALL_LLM_RETRIES):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+            choice = response.choices[0]
+            usage = response.usage
+            return (
+                choice.message.content.strip(),
+                usage.total_tokens if usage else 0,
+                usage.prompt_tokens if usage else 0,
+                usage.completion_tokens if usage else 0,
+            )
+        except (ConnectionError, OSError) as exc:
+            last_exc = exc
+            wait = _CALL_LLM_BACKOFF[min(attempt, len(_CALL_LLM_BACKOFF) - 1)]
+            log.warning(
+                "LLM connection error (attempt %d/%d): %s — retry in %ds",
+                attempt + 1, _CALL_LLM_RETRIES, exc, wait,
+            )
+            _time.sleep(wait)
+    raise last_exc  # type: ignore[misc]
 
 
 def decompose_claim(claim_text: str) -> tuple[list[str], int, int, int]:
