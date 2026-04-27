@@ -13,10 +13,7 @@ from agents_dem.prompts import FACTCHECK_PROMPT
 try:
     from ddgs import DDGS
 except ImportError:
-    try:
-        from duckduckgo_search import DDGS  # legacy fallback
-    except ImportError:
-        DDGS = None
+    DDGS = None
 
 load_dotenv()
 
@@ -102,7 +99,7 @@ class SingleWebAgent(BaseAgent):
                 system_prompt=REACT_SYSTEM_PROMPT,
                 user_query=claim_text,
                 available_tools=REACT_TOOLS,
-                max_steps=5
+                max_steps=8
             )
             model_label = result.get("label", "ERROR")
             raw_trajectory = json.dumps(result.get("trajectory", []), ensure_ascii=False)

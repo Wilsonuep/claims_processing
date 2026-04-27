@@ -9,7 +9,12 @@ description = "Claims Processing project"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["local_builder*", "agents_dem*", "agents_uam*", "dataprep*", "datascrap*", "eval*", "gen_agent*", "monitoring*", "scripts*", "data*]
+include = ["local_builder*", "agents_dem*", "agents_uam*", "dataprep*", "datascrap*", "eval*", "gen_agent*", "monitoring*", "scripts*", "data*"]
+
+[tool.pyrefly]
+project_includes = ["."]
+project_excludes = [".venv", "claims_processing.egg-info", "data", "results"]
+replace_imports_with_any = ["torch", "torchvision", "torchaudio", "transformers", "sentence_transformers", "huggingface_hub", "tokenizers", "safetensors", "accelerate", "datasets"]
 
 [tool.pyright]
 include = ["."]

@@ -161,8 +161,13 @@ def register_agent(agent: BaseAgent) -> None:
         )
     if not hasattr(agent, "name") or not agent.name:
         raise ValueError("Agent musi mieć ustawiony atrybut 'name'.")
+    # Always encode the model in agent_name so rows are identifiable without
+    # consulting the model_name column (e.g. uam_ga6__llama3.1-8b).
+    if agent.model_name and "__" not in agent.name:
+        suffix = agent.model_name.replace("/", "-").replace(":", "-")
+        agent.name = f"{agent.name}__{suffix}"
     _AGENT_REGISTRY.append(agent)
-    log.info("Zarejestrowano agenta: %s", agent.name)
+    log.info("Zarejestrowano agenta: %s (model: %s)", agent.name, agent.model_name or "default")
 
 
 def get_registered_agents() -> list[BaseAgent]:
@@ -208,6 +213,13 @@ CREATE INDEX IF NOT EXISTS idx_agent_results_claim_id
     ON agent_results(claim_id);
 """
 
+# Unique run key: one result per (agent, claim, benchmark, model).
+# INSERT OR IGNORE in insert_result() enforces this at write time too.
+_CREATE_UNIQUE_IDX = """\
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_results_unique_run
+    ON agent_results(agent_name, claim_id, benchmark_name, model_name);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Inicjalizacja bazy wyników
@@ -248,6 +260,9 @@ def init_results_db(db_path: str) -> sqlite3.Connection:
         log.info("Migracja: dodano kolumnę model_name do agent_results.")
     except sqlite3.OperationalError:
         pass  # column already exists
+
+    # Migration: unique index prevents duplicate (agent, claim, benchmark, model) rows
+    cur.execute(_CREATE_UNIQUE_IDX)
 
     conn.commit()
     log.info("Baza wyników gotowa: %s", db_path)
@@ -309,7 +324,7 @@ def insert_result(
 
     conn.execute(
         """
-        INSERT INTO agent_results
+        INSERT OR IGNORE INTO agent_results
             (agent_name, claim_id, benchmark_name, original_label,
              model_label, is_correct, total_tokens, prompt_tokens,
              completion_tokens, time_thought, raw_output, model_name, created_at)
@@ -334,22 +349,23 @@ def insert_result(
 
 
 def get_evaluated_claim_ids(
-    conn: sqlite3.Connection, agent_name: str, benchmark_name: str
+    conn: sqlite3.Connection, agent_name: str, benchmark_name: str,
+    model_name: str = "",
 ) -> set[int]:
-    """Zwraca zbiór ID twierdzeń już przetworzonych przez agenta.
+    """Zwraca zbiór ID twierdzeń już przetworzonych przez agenta dla danego modelu.
     Ewentualne błędy (model_label = 'ERROR') są usuwane by spróbować ponownie.
     """
     conn.execute(
-        "DELETE FROM agent_results WHERE agent_name = ? AND benchmark_name = ? AND model_label = 'ERROR'",
-        (agent_name, benchmark_name),
+        "DELETE FROM agent_results WHERE agent_name = ? AND benchmark_name = ? AND model_name = ? AND model_label = 'ERROR'",
+        (agent_name, benchmark_name, model_name),
     )
     conn.commit()
 
     query = '''
         SELECT claim_id FROM agent_results
-        WHERE agent_name = ? AND benchmark_name = ?
+        WHERE agent_name = ? AND benchmark_name = ? AND model_name = ?
     '''
-    rows = conn.execute(query, (agent_name, benchmark_name)).fetchall()
+    rows = conn.execute(query, (agent_name, benchmark_name, model_name)).fetchall()
     return {row[0] for row in rows}
 
 
@@ -443,9 +459,16 @@ def eval_benchmark(
     results_conn = init_results_db(results_db_path)
 
     if clear:
-        results_conn.execute("DELETE FROM agent_results")
+        for _a in agents:
+            results_conn.execute(
+                "DELETE FROM agent_results WHERE agent_name = ? AND benchmark_name = ? AND model_name = ?",
+                (_a.name, benchmark_name, _a.model_name or ""),
+            )
         results_conn.commit()
-        log.info("Wyczyszczono poprzednie wyniki w %s", results_db_path)
+        log.info(
+            "Wyczyszczono wyniki dla %d agentów: %s",
+            len(agents), ", ".join(a.name for a in agents),
+        )
 
     # --- Pobranie twierdzeń ---
     query = "SELECT * FROM claims"
@@ -462,7 +485,7 @@ def eval_benchmark(
         log.info("Agent: %s", agent.name)
         log.info("─" * 40)
 
-        evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name)
+        evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name, agent.model_name or "")
         pending_rows = [row for row in rows if row["id"] not in evaluated_ids]
 
         if not pending_rows:
@@ -671,9 +694,16 @@ def eval_benchmark_cloud(
     results_conn = init_results_db(results_db_path)
 
     if clear:
-        results_conn.execute("DELETE FROM agent_results")
+        for _a in agents:
+            results_conn.execute(
+                "DELETE FROM agent_results WHERE agent_name = ? AND benchmark_name = ? AND model_name = ?",
+                (_a.name, benchmark_name, _a.model_name or ""),
+            )
         results_conn.commit()
-        log.info("Wyczyszczono poprzednie wyniki w %s", results_db_path)
+        log.info(
+            "Wyczyszczono wyniki dla %d agentów: %s",
+            len(agents), ", ".join(a.name for a in agents),
+        )
 
     query = "SELECT * FROM claims"
     if limit:
@@ -691,7 +721,7 @@ def eval_benchmark_cloud(
         log.info("Agent: %s (cloud, %d workers)", agent.name, workers)
         log.info("─" * 40)
 
-        evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name)
+        evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name, agent.model_name or "")
         pending_claims = [c for c in claims if c["id"] not in evaluated_ids]
 
         if not pending_claims:
@@ -875,9 +905,16 @@ def eval_benchmark_local(
     results_conn = init_results_db(results_db_path)
 
     if clear:
-        results_conn.execute("DELETE FROM agent_results")
+        for _a in agents:
+            results_conn.execute(
+                "DELETE FROM agent_results WHERE agent_name = ? AND benchmark_name = ? AND model_name = ?",
+                (_a.name, benchmark_name, _a.model_name or ""),
+            )
         results_conn.commit()
-        log.info("Wyczyszczono poprzednie wyniki.")
+        log.info(
+            "Wyczyszczono wyniki dla %d agentów: %s",
+            len(agents), ", ".join(a.name for a in agents),
+        )
 
     # Execute tiers in order (fast first → expensive last)
     for tier_num in (1, 2, 3):
@@ -909,7 +946,7 @@ def eval_benchmark_local(
             )
             log.info("─" * 40)
 
-            evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name)
+            evaluated_ids = get_evaluated_claim_ids(results_conn, agent.name, benchmark_name, agent.model_name or "")
             pending_rows = [row for row in rows if row["id"] not in evaluated_ids]
 
             if not pending_rows:

@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 import time
 from typing import Any
 from dotenv import load_dotenv
@@ -12,10 +13,7 @@ from gen_agent.react import run_react_agent
 try:
     from ddgs import DDGS
 except ImportError:
-    try:
-        from duckduckgo_search import DDGS  # legacy fallback
-    except ImportError:
-        DDGS = None
+    DDGS = None
 
 load_dotenv()
 
@@ -67,6 +65,24 @@ Gdy będziesz gotowy wydać ostateczny werdykt (0, 1, 2 lub 3), użyj akcji `fin
 Jeśli twój model używa tagów <think> (np DeepSeek), wstaw blok json na zewnątrz / po tagach think.
 """
 
+
+def _normalize_uam_label(raw: str) -> str:
+    s = str(raw).strip()
+    # "1.0" → "1" (only for exact integer floats)
+    try:
+        f = float(s)
+        rounded = str(round(f))
+        if rounded in {"0", "1", "2", "3"} and abs(f - round(f)) < 0.01:
+            return rounded
+    except ValueError:
+        pass
+    # "Output: 2" or similar prefix → extract digit
+    m = re.search(r"\b([0-3])\b", s)
+    if m:
+        return m.group(1)
+    return s  # leave ERROR / ERROR_MAX_STEPS unchanged
+
+
 class SingleWebAgent(BaseAgent):
     name = "uam_ga2"
     cost_tier = 1
@@ -94,9 +110,9 @@ class SingleWebAgent(BaseAgent):
                 system_prompt=SYSTEM_PROMPT,
                 user_query=claim_text,
                 available_tools=REACT_TOOLS,
-                max_steps=5
+                max_steps=8
             )
-            model_label = result.get("label", "ERROR")
+            model_label = _normalize_uam_label(result.get("label") or "ERROR")
             raw_trajectory = json.dumps(result.get("trajectory", []), ensure_ascii=False)
 
         except Exception as exc:

@@ -97,7 +97,7 @@ def run_react_agent(
         # 3. Check for Final Answer
         if action == "final_answer":
             return {
-                "label": action_input.get("label", "ERROR"),
+                "label": action_input.get("label") or "ERROR",
                 "reasoning": action_input.get("reasoning", ""),
                 "total_tokens": total_tokens,
                 "prompt_tokens": prompt_tokens,
