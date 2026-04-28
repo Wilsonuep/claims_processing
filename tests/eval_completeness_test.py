@@ -1,10 +1,15 @@
 import os
 import ast
+import sys
 import sqlite3
 import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Polish characters and emojis would crash on Windows cp1252 stdout
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 def find_agent_names(directory: Path) -> list[str]:
     """Skanuje pliki .py w poszukiwaniu klas dziedziczących z BaseAgent i atrybutu name."""
@@ -117,8 +122,8 @@ def main():
     dem_dir = PROJECT_ROOT / "agents_dem"
     
     # Lokacje baz
-    am_bench_input = PROJECT_ROOT / "dataprep" / "am_benchmark.db"
-    demagog_input = PROJECT_ROOT / "dataprep" / "demagog.db"
+    am_bench_input = PROJECT_ROOT / "data" / "am_benchmark.db"
+    demagog_input = PROJECT_ROOT / "data" / "demagog.db"
     
     if args.results_db:
         # User explicitly passed a merged database

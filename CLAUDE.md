@@ -138,17 +138,25 @@ A UNIQUE INDEX on `(agent_name, claim_id, benchmark_name, model_name)` prevents 
 - **`agent_name` always carries a `__<model-suffix>`** (e.g. `uam_ga6__llama3.1-8b`). `register_agent()` applies this automatically so Bielik and llama rows for the same agent are distinguishable by name alone, not just by `model_name` column.
 - **`get_evaluated_claim_ids` takes a `model_name` arg** — different models for the same agent accumulate as independent row sets.
 
-These rules exist because a bare `--clear` once wiped Bielik results for `uam_ga6` and `uam_ga_7` before a llama re-run, losing data permanently.
+These rules exist because a bare `--clear` once wiped Bielik results for `uam_ga6` and `uam_ga7` before a llama re-run, losing data permanently.
 
-### Current data state (2026-04-28)
+### Current data state (2026-04-28, post-naming-sweep)
 
-| Agent | Model | Status |
-|-------|-------|--------|
-| uam_ga1–ga5 | Bielik | complete |
-| uam_ga6 | llama3.1:8b | complete — **Bielik run lost, needs re-run** |
-| uam_ga_7 | llama3.1:8b | in progress (~3k/18820) — **Bielik run lost, needs re-run** |
+All rows in `agent_results` now carry a `__<model-suffix>` (no un-suffixed legacy rows remaining). Bielik suffix: `__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`. Llama suffix: `__llama3.1-8b`.
 
-Re-run command (after ga_7 llama finishes, without `--clear`):
+| Agent | Bielik (Q4_K_M) | llama3.1:8b |
+|-------|-----------------|-------------|
+| uam_ga1 | complete (18,820) | complete (18,820) |
+| uam_ga2 | complete (18,820) | **registered for run** |
+| uam_ga3 | complete (18,820) | **registered for run** |
+| uam_ga4 | complete (18,820) | **registered for run** |
+| uam_ga5 | complete (18,820) | **registered for run** |
+| uam_ga6 | **needs re-run** (Bielik lost) | complete (18,820) |
+| uam_ga7 | **needs re-run** (Bielik lost) | **resume from 3,397/18,820** |
+
+`AGENT_CONFIG["name"]` was normalized from `uam_ga_7` → `uam_ga7` in `agents_uam/fewshot_cot_debate_rag.py`; the corresponding 3,397 DB rows were renamed to match.
+
+Bielik re-run for ga6/ga7 (after the llama batch completes, without `--clear`) — set `LLM_MODEL=hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M` in `.env` or change `model_override` in `_register_default_agents()`, then:
 ```bash
-python -m scripts.run_eval_am_benchmark --agents uam_ga6,uam_ga_7 --models "hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M"
+python -m scripts.run_eval_am_benchmark --agents uam_ga6,uam_ga7
 ```

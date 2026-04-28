@@ -56,7 +56,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from typing import Any, Callable
+
+# At ~28 KB per cached 1024-dim embedding, 5000 entries caps the cache
+# at ~140 MB. Tier-3 agents over an 18k-claim run otherwise filled this
+# unbounded, contributing to the overnight system lockup on 2026-04-28.
+_EMBED_CACHE_MAX_ENTRIES: int = 5000
 
 # ---------------------------------------------------------------------------
 # Konfiguracja logowania
@@ -221,7 +227,7 @@ class RAGRetriever:
         )
         self._embed_device = embed_device
         self._embedding_dim = embedding_dim
-        self._embed_cache: dict[str, list[float]] = {}  # query → embedding cache
+        self._embed_cache: "OrderedDict[str, list[float]]" = OrderedDict()
 
         if mode in ("vector", "hybrid"):
             if vector_db_path is None:
@@ -305,9 +311,14 @@ class RAGRetriever:
         from dataprep.wikipedia_db import knn_search
 
         embed_fn = self._get_embed_fn()
-        if query not in self._embed_cache:
-            self._embed_cache[query] = embed_fn(query)
-        query_embedding = self._embed_cache[query]
+        if query in self._embed_cache:
+            self._embed_cache.move_to_end(query)
+            query_embedding = self._embed_cache[query]
+        else:
+            query_embedding = embed_fn(query)
+            self._embed_cache[query] = query_embedding
+            if len(self._embed_cache) > _EMBED_CACHE_MAX_ENTRIES:
+                self._embed_cache.popitem(last=False)
 
         results = knn_search(self._vector_conn, query_embedding, k=k)
 

@@ -95,17 +95,21 @@ def _get_completed_pairs() -> set[tuple[str, str]]:
         return set()
 
 
-def _register_default_agents(models: list[str] | None = None) -> None:
+def _register_default_agents() -> None:
     from eval.eval_loop import register_agent
+    from agents_uam.single import SingleAgent
     from agents_uam.single_web import SingleWebAgent
     from agents_uam.single_bm25 import SingleBM25Agent
     from agents_uam.rag_claim_decomp import ClaimDecompRAGAgent
+    from agents_uam.bm25_claim_decomp import ClaimDecompBM25Agent
+    from agents_uam.fewshot_cot_debate_rag import DebateCoTAgent
 
-    model_list = models or [None]  # None = use global MODEL from .env
-    for model_override in model_list:
-        register_agent(SingleWebAgent(model_override=model_override))         # uam_ga2  tier 1
-        register_agent(SingleBM25Agent(model_override=model_override))        # uam_ga3  tier 1 RAG
-        # register_agent(ClaimDecompRAGAgent(model_override=model_override))    # uam_ga4  tier 2 RAG
+    register_agent(SingleAgent())                                             # uam_ga1   tier 1
+    register_agent(SingleWebAgent(model_override="llama3.1:8b"))              # uam_ga2   tier 1
+    register_agent(SingleBM25Agent(model_override="llama3.1:8b"))             # uam_ga3   tier 1 RAG
+    register_agent(ClaimDecompRAGAgent(model_override="llama3.1:8b"))         # uam_ga4   tier 2 RAG
+    register_agent(ClaimDecompBM25Agent(model_override="llama3.1:8b"))        # uam_ga5   tier 2 RAG
+    register_agent(DebateCoTAgent(model_override="llama3.1:8b"))              # uam_ga7   tier 3
 
 
 # ---------------------------------------------------------------------------
@@ -151,16 +155,6 @@ def main() -> None:
         help="Liczba równoległych workerów (tylko --mode cloud).",
     )
     parser.add_argument(
-        "--models",
-        type=str,
-        default=None,
-        help=(
-            "Nazwy modeli oddzielone przecinkami. Tworzy wariant każdego agenta "
-            "dla każdego modelu. Np. --models bielik-11b,llama3.1:8b. "
-            "Domyślnie: globalny LLM_MODEL z .env."
-        ),
-    )
-    parser.add_argument(
         "--tier2-limit",
         type=int,
         default=20000,
@@ -183,8 +177,7 @@ def main() -> None:
     )
 
     # Rejestracja agentów
-    models_list = [m.strip() for m in args.models.split(",")] if args.models else None
-    _register_default_agents(models=models_list)
+    _register_default_agents()
 
     agents = get_registered_agents()
 
