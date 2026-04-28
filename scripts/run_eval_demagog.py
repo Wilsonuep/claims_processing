@@ -91,21 +91,13 @@ def _get_completed_pairs() -> set[tuple[str, str]]:
 
 def _register_default_agents(models: list[str] | None = None) -> None:
     from eval.eval_loop import register_agent
-    from agents_dem.single import SingleAgent
-    from agents_dem.single_web import SingleWebAgent
-    from agents_dem.single_bm25 import SingleBM25Agent
     from agents_dem.bm25_claim_decomp import ClaimDecompBM25Agent
-    from agents_dem.rag_claim_decomp import ClaimDecompRAGAgent
     from agents_dem.fewshot_cot_rag import FewShotCoTAgent
     from agents_dem.fewshot_cot_debate_rag import DebateCoTAgent
 
     model_list = models or [None]  # None = use global MODEL from .env
     for model_override in model_list:
-        register_agent(SingleAgent(model_override=model_override))            # dem_ga1  tier 1
-        register_agent(SingleWebAgent(model_override=model_override))         # dem_ga2  tier 1
-        register_agent(SingleBM25Agent(model_override=model_override))        # dem_ga3  tier 1
         register_agent(ClaimDecompBM25Agent(model_override=model_override))   # dem_ga5  tier 2
-        register_agent(ClaimDecompRAGAgent(model_override=model_override))    # dem_ga4  tier 2
         register_agent(FewShotCoTAgent(model_override=model_override))        # dem_ga6  tier 3
         register_agent(DebateCoTAgent(model_override=model_override))         # dem_ga7  tier 3
 
