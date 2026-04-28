@@ -40,15 +40,25 @@ python -m scripts.merge_results --target results/merged.db --sources results/res
 python scripts/analyze_results.py
 python scripts/fix_corrupted_results.py --dry-run
 python scripts/fix_corrupted_results.py
+
+# Backup results DBs (non-blocking, safe during eval runs)
+python -m scripts.backup_dbs                       # backs up to D:\claims_backup\ by default
+python -m scripts.backup_dbs --dest E:\backup
+python -m scripts.schedule_backup --interval 3     # runs backup_dbs every 3 hours; keep terminal open
 ```
 
 ## Tests
 
 ```bash
-python tests/tester.py          # full integration suite (12 tests)
+python tests/tester.py          # full integration suite (runs test_01 through test_11)
 python tests/test_04_eval_local.py   # LLM ping + local eval
 python tests/test_05_eval_cloud.py   # parallel eval
+python tests/test_06_cuda_gpu.py     # GPU availability check
+python tests/test_07_monitoring.py   # push notification smoke test
 python tests/test_08_crash_recovery.py
+python tests/test_09_bm25_polish.py  # requires BM25_WIKI_DB
+python tests/test_10b_bm25_cache.py  # process-level cache behaviour
+python tests/test_11_am_agent_config.py  # AM agent config checks
 python tests/eval_completeness_test.py --results-db results/merged_eval.db
 ```
 
@@ -76,7 +86,7 @@ All agents inherit from `BaseAgent` (`gen_agent/base_agent.py`) and must return 
 
 `llm_client.py` is a universal LLM factory — a module-level `client` singleton is created on import from env vars. Agents pass `model_override` to `make_client()` to create per-agent clients for multi-model evaluation runs.
 
-`react.py` implements a universal ReAct loop used by all `*_web.py` agents. `parse_react_output()` strips configurable thinking tags then extracts JSON (prefers ` ```json ``` ` blocks, falls back to first `{` / last `}`). Max steps default is 8 (was 5 — low step counts cause most `ERROR_MAX_STEPS` failures).
+`react.py` implements a universal ReAct loop used by all `*_web.py` agents. `parse_react_output()` strips configurable thinking tags then extracts JSON (prefers ` ```json ``` ` blocks, falls back to first `{` / last `}`). The `run_react_agent()` default is `max_steps=5`; `*_web.py` agents (ga2) pass `max_steps=8` explicitly — low step counts cause most `ERROR_MAX_STEPS` failures.
 
 `bm25.py` and `rag.py` use **process-level caches** (`_INDEX_CACHE`, `_MODEL_CACHE`, `_embed_cache`) to share the 4–6 GB BM25 index and embedding model across all agents. Never load these objects twice in the same process.
 
@@ -93,11 +103,17 @@ All agents inherit from `BaseAgent` (`gen_agent/base_agent.py`) and must return 
 | uam_ga6 | fewshot_cot_rag.py | Few-shot CoT + 3 reasoners + RAG | 2 |
 | uam_ga7 | fewshot_cot_debate_rag.py | Adversarial debate + judge + RAG | 3 |
 
-**Demagog agents** (`agents_dem/`, names `dem_ga1`–`dem_ga7`) mirror the UAM structure with Polish fact-checking prompts and text labels instead of 0–3.
+**Demagog agents** (`agents_dem/`, names `dem_ga1`–`dem_ga7`) mirror the UAM structure with Polish fact-checking prompts and text labels instead of 0–3. Shared prompts live in `agents_dem/prompts.py`.
 
 **AM benchmark quirk**: Agents must use `claim.get("label_original", "") or claim.get("label", "")` for the ground-truth label, and call `_build_question_with_answers()` to inject answer choices from `claim["metadata"]["answers"]` into the question string.
 
 **Multi-model runs**: When `model_override` is passed, `__init__` creates a private `(client, model)` pair, patches module-level globals during `eval()`, then restores them. Agent name becomes `uam_ga2__model-name`. Safe in sequential mode; thread-safety is not guaranteed in cloud-parallel mode.
+
+### Agent Registration
+
+Agents for each benchmark run are wired in `_register_default_agents()` inside `scripts/run_eval_am_benchmark.py` and `scripts/run_eval_demagog.py`. To add or remove agents from a run, edit that function. Note: `uam_ga6` (`FewShotCoTRAGAgent`) is currently **not** registered in `_register_default_agents()` for the AM benchmark run.
+
+`run_eval_am_benchmark.py` uses `data/am_benchmark.db` as its input DB (not `dataprep/am_benchmark.db` as in the generic eval_loop config) and defaults to `--mode local`.
 
 ### Evaluation Loop (`eval/eval_loop.py`)
 
