@@ -36,6 +36,12 @@ python scripts/run_eval_demagog.py --limit 10
 # Merge results from multiple machines
 python -m scripts.merge_results --target results/merged.db --sources results/results_am_benchmark.db other.db
 
+# Direct eval-loop CLI (advanced — wrappers above call into this)
+python -m eval.eval_loop --benchmarks am_benchmark --agents uam_ga1,uam_ga2
+python -m eval.eval_loop --mode cloud --workers 10
+python -m eval.eval_loop --mode local --tier2-limit 500 --tier3-limit 100
+python -m eval.eval_loop --clear --export-csv   # destructive; scope with --agents
+
 # Analyze corrupted results
 python scripts/analyze_results.py
 python scripts/fix_corrupted_results.py --dry-run
@@ -117,10 +123,12 @@ Agents for each benchmark run are wired in `_register_default_agents()` inside `
 
 ### Evaluation Loop (`eval/eval_loop.py`)
 
+Directly invokable as `python -m eval.eval_loop` (flags: `--benchmarks`, `--agents`, `--limit`, `--clear`, `--export-csv`, `--mode`, `--workers`, `--tier2-limit`, `--tier3-limit`). The wrapper scripts (`run_eval_am_benchmark.py`, `run_eval_demagog.py`) call the same `eval_benchmark*` functions and register their own agents, so for normal use prefer the wrappers — direct invocation skips the wrapper's `_register_default_agents()` so you must register agents from the calling code.
+
 Three modes wired in `run_eval_*.py` scripts:
 - **sequential** — single-threaded, used by tests
 - **cloud** — `ThreadPoolExecutor(workers)`, for Together.ai / cloud APIs
-- **local** — tiered: tier-1 agents on full dataset, tier-2 on `--tier2-limit` (default 2000), tier-3 on `--tier3-limit` (default 500)
+- **local** — tiered: tier-1 on full dataset, tier-2 on `--tier2-limit`, tier-3 on `--tier3-limit`. Defaults are **20000 / 20000** in the AM/Demagog wrapper scripts (effectively "no cap" against an 18,820-row benchmark) but **2000 / 500** when invoking `eval/eval_loop.py` directly. The wrapper override is intentional — pass smaller values explicitly if you want to throttle tier 2/3.
 
 **Crash recovery**: On startup, `get_evaluated_claim_ids()` queries existing results, deletes `model_label='ERROR'` rows, and returns already-processed claim IDs so they are skipped. `ERROR_MAX_STEPS` rows are **not** auto-deleted — use `scripts/fix_corrupted_results.py` to handle them.
 

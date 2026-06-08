@@ -40,10 +40,10 @@ AGENT_CONFIG = {
 }
 
 
-def ask(question: str) -> dict:
+def ask(question: str, model_name: str | None = None) -> dict:
     """Wysyła pytanie do agenta i zwraca odpowiedź wraz z metadanymi."""
     response = client.chat.completions.create(
-        model=model,
+        model=model_name or model,
         messages=[
             {"role": "system", "content": AGENT_CONFIG["system_prompt"]},
             {"role": "user", "content": question},
@@ -94,8 +94,16 @@ class SingleAgent(BaseAgent):
     name = AGENT_CONFIG["name"]
     cost_tier = 1
 
-    def __init__(self) -> None:
-        self.model_name = MODEL
+    def __init__(self, model_override: str | None = None) -> None:
+        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        if model_override is not None:
+            _, self._model = make_client(model_override)
+            suffix = model_override.replace("/", "-").replace(":", "-")
+            self.name = f"uam_ga1__{suffix}"
+            self.model_name = model_override
+        else:
+            self._model = MODEL
+            self.model_name = _DEFAULT_MODEL
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         claim_text = claim.get("claim_text", "")
@@ -104,7 +112,7 @@ class SingleAgent(BaseAgent):
 
         t0 = time.perf_counter()
         try:
-            result = ask(question_with_answers)
+            result = ask(question_with_answers, self._model)
         except Exception as exc:
             log.error("Błąd agenta: %s", exc)
             elapsed = time.perf_counter() - t0

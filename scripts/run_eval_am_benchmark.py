@@ -66,18 +66,21 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # gdy będą gotowi do ewaluacji.
 
 
-def _get_completed_pairs() -> set[tuple[str, str]]:
+def _get_completed_pairs(input_db_path: str = INPUT_DB_PATH) -> set[tuple[str, str]]:
     """Returns (base_agent_name, model_name) pairs that have a complete set of results.
 
     base_agent_name is derived by splitting agent_name at the first '__'
     (e.g. 'uam_ga1__bielik' → 'uam_ga1').  This lets us match a run stored
     under 'uam_ga1__bielik' against a freshly registered 'uam_ga1' that has
     the same model_name, whether or not --models was passed this time.
+
+    `input_db_path` controls the "total claims" denominator — pass the subset
+    DB when --subset is on so completeness is measured against 4 000.
     """
-    if not os.path.exists(RESULTS_DB_PATH) or not os.path.exists(INPUT_DB_PATH):
+    if not os.path.exists(RESULTS_DB_PATH) or not os.path.exists(input_db_path):
         return set()
     try:
-        total = sqlite3.connect(INPUT_DB_PATH).execute(
+        total = sqlite3.connect(input_db_path).execute(
             "SELECT COUNT(*) FROM claims"
         ).fetchone()[0]
         rows = sqlite3.connect(RESULTS_DB_PATH).execute(
@@ -96,20 +99,24 @@ def _get_completed_pairs() -> set[tuple[str, str]]:
 
 
 def _register_default_agents() -> None:
+    # Prereq: `ollama pull qwen2.5:7b` must have been run on this host.
     from eval.eval_loop import register_agent
     from agents_uam.single import SingleAgent
     from agents_uam.single_web import SingleWebAgent
     from agents_uam.single_bm25 import SingleBM25Agent
     from agents_uam.rag_claim_decomp import ClaimDecompRAGAgent
     from agents_uam.bm25_claim_decomp import ClaimDecompBM25Agent
+    from agents_uam.fewshot_cot_rag import FewShotCoTAgent
     from agents_uam.fewshot_cot_debate_rag import DebateCoTAgent
 
-    register_agent(SingleAgent())                                             # uam_ga1   tier 1
-    register_agent(SingleWebAgent(model_override="llama3.1:8b"))              # uam_ga2   tier 1
-    register_agent(SingleBM25Agent(model_override="llama3.1:8b"))             # uam_ga3   tier 1 RAG
-    register_agent(ClaimDecompRAGAgent(model_override="llama3.1:8b"))         # uam_ga4   tier 2 RAG
-    register_agent(ClaimDecompBM25Agent(model_override="llama3.1:8b"))        # uam_ga5   tier 2 RAG
-    register_agent(DebateCoTAgent(model_override="llama3.1:8b"))              # uam_ga7   tier 3
+    MODEL = "qwen2.5:7b"
+    register_agent(SingleAgent(model_override=MODEL))           # uam_ga1  tier 1
+    register_agent(SingleWebAgent(model_override=MODEL))        # uam_ga2  tier 1
+    register_agent(SingleBM25Agent(model_override=MODEL))       # uam_ga3  tier 1
+    register_agent(ClaimDecompRAGAgent(model_override=MODEL))   # uam_ga4  tier 2
+    register_agent(ClaimDecompBM25Agent(model_override=MODEL))  # uam_ga5  tier 2
+    register_agent(FewShotCoTAgent(model_override=MODEL))       # uam_ga6  tier 3
+    register_agent(DebateCoTAgent(model_override=MODEL))        # uam_ga7  tier 3
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +173,24 @@ def main() -> None:
         default=20000,
         help="Maks. liczba claimów dla agentów tier 3 (tylko --mode local).",
     )
+    parser.add_argument(
+        "--subset",
+        action="store_true",
+        help="Użyj data/am_benchmark_4k.db (4000-claim subset) zamiast pełnego benchmarku.",
+    )
     args = parser.parse_args()
+
+    input_db_path = INPUT_DB_PATH
+    if args.subset:
+        input_db_path = str(PROJECT_ROOT / "data" / "am_benchmark_4k.db")
+        if not os.path.exists(input_db_path):
+            log.error(
+                "Subset DB nie istnieje: %s\n"
+                "  Uruchom najpierw: python scripts/build_am_benchmark_subset.py",
+                input_db_path,
+            )
+            return
+        log.info("Subset mode: używam %s", input_db_path)
 
     from eval.eval_loop import (
         eval_benchmark,
@@ -189,7 +213,7 @@ def main() -> None:
     # Matches by (base_name, model_name) so runs stored with --models suffix
     # are still recognised when re-running without --models (and vice-versa).
     if not args.clear:
-        completed_pairs = _get_completed_pairs()
+        completed_pairs = _get_completed_pairs(input_db_path)
         if completed_pairs:
             def _is_done(a) -> bool:
                 base = a.name.split("__")[0]
@@ -207,7 +231,7 @@ def main() -> None:
         return
 
     log.info("Benchmark: %s", BENCHMARK_NAME)
-    log.info("Input DB:  %s", INPUT_DB_PATH)
+    log.info("Input DB:  %s", input_db_path)
     log.info("Output DB: %s", RESULTS_DB_PATH)
     log.info("Agenci:    %s", ", ".join(a.name for a in agents))
 
@@ -216,7 +240,7 @@ def main() -> None:
         if args.mode == "local":
             eval_benchmark_local(
                 benchmark_name=BENCHMARK_NAME,
-                input_db_path=INPUT_DB_PATH,
+                input_db_path=input_db_path,
                 results_db_path=RESULTS_DB_PATH,
                 agents=agents,
                 limit=args.limit,
@@ -227,7 +251,7 @@ def main() -> None:
         elif args.mode == "cloud":
             eval_benchmark_cloud(
                 benchmark_name=BENCHMARK_NAME,
-                input_db_path=INPUT_DB_PATH,
+                input_db_path=input_db_path,
                 results_db_path=RESULTS_DB_PATH,
                 agents=agents,
                 limit=args.limit,
@@ -237,7 +261,7 @@ def main() -> None:
         else:
             eval_benchmark(
                 benchmark_name=BENCHMARK_NAME,
-                input_db_path=INPUT_DB_PATH,
+                input_db_path=input_db_path,
                 results_db_path=RESULTS_DB_PATH,
                 agents=agents,
                 limit=args.limit,
