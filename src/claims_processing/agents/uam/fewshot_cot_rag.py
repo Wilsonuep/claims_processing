@@ -856,7 +856,7 @@ def _get_nli_verifier() -> NLIVerifier:
 # ═══════════════════════════════════════════════════════════════════════════
 
 AGENT_CONFIG = {
-    "name": "uam_ga6",
+    "name": "uam_ga5",
     "model": MODEL,
     "system_prompt": "Few-Shot CoT: Decomposer → RAG (two-stage) → 3×Reasoner → Consolidator",
     "tools": ["rag_two_stage", "claim_decomposition", "cot_multi_voter"],

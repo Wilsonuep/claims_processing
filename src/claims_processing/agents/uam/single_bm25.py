@@ -41,7 +41,7 @@ def _get_bm25():
 
 
 AGENT_CONFIG = {
-    "name": "uam_ga3",
+    "name": "uam_ga2",
     "model": model,
     "system_prompt": (
         "Jesteś agentem który ma za zadanie ocenić prawdziwość wypowiedzi z wykorzystaniem "
@@ -123,7 +123,7 @@ def _build_question_with_answers(claim_text: str, claim: dict) -> str:
 
 
 class SingleBM25Agent(BaseAgent):
-    """Open-book BM25 agent (uam_ga3)."""
+    """Open-book BM25 agent (uam_ga2)."""
 
     name = AGENT_CONFIG["name"]
     cost_tier = 1

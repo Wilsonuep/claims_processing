@@ -36,6 +36,16 @@ Helpers to pull/verify local models and benchmark them
 (`model_registry.py`, `setup_ollama.py`, `benchmark.py`). Optional; only needed
 for local (Ollama) inference setup.
 
+## discontinued/ — retired agents
+
+`single_web.py` — the former **uam_ga2** agent (zero-shot + ReAct + DuckDuckGo
+web tool), renamed **`uam_ga_web_tool_arch`**. It was misconfigured and removed
+from the active AM benchmark; the remaining agents were renumbered down to
+uam_ga1–uam_ga6. Its existing result rows were renamed to
+`uam_ga_web_tool_arch__*` in the results DBs (preserved, not deleted). Kept for
+reference only — it still imports `claims_processing.core.*` but is no longer
+registered for runs.
+
 ## oneoff/ — one-off utilities
 
 `test_api.py` (quick LLM API ping) and `json_file_check.py` (JSON validation).

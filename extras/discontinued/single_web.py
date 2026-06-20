@@ -84,7 +84,9 @@ def _normalize_uam_label(raw: str) -> str:
 
 
 class SingleWebAgent(BaseAgent):
-    name = "uam_ga2"
+    # DISCONTINUED — formerly uam_ga2 (ReAct + DuckDuckGo web tool). Misconfigured
+    # and removed from the active benchmark; kept for reference only.
+    name = "uam_ga_web_tool_arch"
     cost_tier = 1
 
     def __init__(self, model_override: str | None = None) -> None:
@@ -92,7 +94,7 @@ class SingleWebAgent(BaseAgent):
         if model_override is not None:
             _, self._model = make_client(model_override)
             suffix = model_override.replace("/", "-").replace(":", "-")
-            self.name = f"uam_ga2__{suffix}"
+            self.name = f"uam_ga_web_tool_arch__{suffix}"
             self.model_name = model_override
         else:
             self._model = MODEL

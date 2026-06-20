@@ -13,7 +13,7 @@ src/claims_processing/
 │   └── retrieval/
 │       ├── bm25.py     # BM25 index (process-level _INDEX_CACHE)
 │       └── rag.py      # RAG retriever: bm25 | vector | hybrid (RRF)
-├── agents/uam/         # the 7 active AM/UAM agents (ga1–ga7)
+├── agents/uam/         # the 6 active AM/UAM agents (ga1–ga6)
 ├── pipeline/
 │   ├── scrape/         # polish_wikipedia_webscrapper.py
 │   └── prepare/        # *_db builders, chunking, embedding, am_benchmark_loader
@@ -49,12 +49,18 @@ same process.
 | Agent   | File                       | Strategy                              | cost_tier |
 |---------|----------------------------|---------------------------------------|-----------|
 | uam_ga1 | single.py                  | Zero-shot JSON                        | 1 |
-| uam_ga2 | single_web.py              | ReAct + DuckDuckGo                    | 1 |
-| uam_ga3 | single_bm25.py             | BM25 Wikipedia retrieval              | 1 |
-| uam_ga4 | rag_claim_decomp.py        | Claim decomp + vector RAG             | 2 |
-| uam_ga5 | bm25_claim_decomp.py       | Claim decomp + BM25                   | 2 |
-| uam_ga6 | fewshot_cot_rag.py         | Few-shot CoT + 3 reasoners + RAG      | 2 |
-| uam_ga7 | fewshot_cot_debate_rag.py  | Adversarial debate + judge + RAG      | 3 |
+| uam_ga2 | single_bm25.py             | BM25 Wikipedia retrieval              | 1 |
+| uam_ga3 | rag_claim_decomp.py        | Claim decomp + vector RAG             | 2 |
+| uam_ga4 | bm25_claim_decomp.py       | Claim decomp + BM25                   | 2 |
+| uam_ga5 | fewshot_cot_rag.py         | Few-shot CoT + 3 reasoners + RAG      | 3 |
+| uam_ga6 | fewshot_cot_debate_rag.py  | Adversarial debate + judge + RAG      | 3 |
+
+> **Discontinued:** the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo
+> web tool) was misconfigured and removed from the benchmark. It is archived as
+> **`uam_ga_web_tool_arch`** in [`extras/discontinued/single_web.py`](../extras/discontinued/single_web.py);
+> its existing result rows were renamed to `uam_ga_web_tool_arch__*` rather than
+> deleted. The remaining agents were renumbered down to ga1–ga6 (the table above
+> reflects the current numbering).
 
 **AM benchmark quirk**: agents use `claim.get("label_original", "") or
 claim.get("label", "")` for the ground-truth label, and call

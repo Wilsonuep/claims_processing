@@ -16,7 +16,7 @@ claims_processing/
 ├── src/claims_processing/      # the installable package (see docs/architecture.md)
 │   ├── paths.py                # single source of truth for all data/results paths
 │   ├── core/                   # BaseAgent, LLM client, ReAct, BM25/RAG retrieval
-│   ├── agents/uam/             # the 7 active agents (uam_ga1–uam_ga7)
+│   ├── agents/uam/             # the 6 active agents (uam_ga1–uam_ga6)
 │   ├── pipeline/{scrape,prepare}/   # data scraping + DB building
 │   ├── evaluation/             # generic eval loop
 │   ├── monitoring/             # push-notification progress/crash alerts

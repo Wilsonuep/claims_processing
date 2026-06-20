@@ -388,7 +388,7 @@ def verify_claim(
 # ---------------------------------------------------------------------------
 
 AGENT_CONFIG = {
-    "name": "uam_ga4",
+    "name": "uam_ga3",
     "model": model,
     "system_prompt": "Multi-agent: Decomposer → Retriever (RAG) → Verifier",
     "tools": ["rag_hybrid", "claim_decomposition"],

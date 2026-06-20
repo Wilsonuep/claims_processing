@@ -103,21 +103,22 @@ def _register_default_agents() -> None:
     # Prereq: `ollama pull hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M` on this host.
     from claims_processing.evaluation.eval_loop import register_agent
     from claims_processing.agents.uam.single import SingleAgent
-    from claims_processing.agents.uam.single_web import SingleWebAgent
     from claims_processing.agents.uam.single_bm25 import SingleBM25Agent
     from claims_processing.agents.uam.rag_claim_decomp import ClaimDecompRAGAgent
     from claims_processing.agents.uam.bm25_claim_decomp import ClaimDecompBM25Agent
     from claims_processing.agents.uam.fewshot_cot_rag import FewShotCoTAgent
     from claims_processing.agents.uam.fewshot_cot_debate_rag import DebateCoTAgent
 
+    # NOTE: the former uam_ga2 (ReAct + DuckDuckGo web tool) was discontinued and
+    # archived as uam_ga_web_tool_arch (see extras/discontinued/single_web.py).
+    # The remaining agents were renumbered down to uam_ga1–uam_ga6.
     MODEL = "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M"
     register_agent(SingleAgent(model_override=MODEL))           # uam_ga1  tier 1
-    register_agent(SingleWebAgent(model_override=MODEL))        # uam_ga2  tier 1
-    register_agent(SingleBM25Agent(model_override=MODEL))       # uam_ga3  tier 1
-    register_agent(ClaimDecompRAGAgent(model_override=MODEL))   # uam_ga4  tier 2
-    register_agent(ClaimDecompBM25Agent(model_override=MODEL))  # uam_ga5  tier 2
-    register_agent(FewShotCoTAgent(model_override=MODEL))       # uam_ga6  tier 3
-    register_agent(DebateCoTAgent(model_override=MODEL))        # uam_ga7  tier 3
+    register_agent(SingleBM25Agent(model_override=MODEL))       # uam_ga2  tier 1
+    register_agent(ClaimDecompRAGAgent(model_override=MODEL))   # uam_ga3  tier 2
+    register_agent(ClaimDecompBM25Agent(model_override=MODEL))  # uam_ga4  tier 2
+    register_agent(FewShotCoTAgent(model_override=MODEL))       # uam_ga5  tier 3
+    register_agent(DebateCoTAgent(model_override=MODEL))        # uam_ga6  tier 3
 
 
 # ---------------------------------------------------------------------------

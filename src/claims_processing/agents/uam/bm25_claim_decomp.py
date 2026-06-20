@@ -294,7 +294,7 @@ def verify_claim(
 # ---------------------------------------------------------------------------
 
 AGENT_CONFIG = {
-    "name": "uam_ga5",
+    "name": "uam_ga4",
     "model": model,
     "system_prompt": "Multi-agent: Decomposer → BM25 Retriever → Verifier",
     "tools": ["bm25_wikipedia", "claim_decomposition"],

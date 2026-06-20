@@ -34,7 +34,7 @@ SUBSET_DB = paths.AM_BENCHMARK_4K_DB
 OUTPUT_DB = paths.RESULTS_AM_SUBSAMPLE_DB
 
 BENCHMARK_NAME = "am_benchmark"
-BASE_AGENTS = [f"uam_ga{i}" for i in range(1, 8)]
+BASE_AGENTS = [f"uam_ga{i}" for i in range(1, 7)]
 
 # model_name -> short label (mirrors _short_model() used in the notebooks)
 MODELS = {

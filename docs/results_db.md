@@ -13,9 +13,8 @@ Valid labels:
 - `ERROR_MAX_STEPS` — agent hit the ReAct step limit; the trajectory in
   `raw_output` often has a recoverable label.
 - `ERROR` — exception; auto-deleted on the next eval run.
-- Float labels (`"1.0"`), prefix labels (`"Output: 2"`) —
-  `_normalize_uam_label()` in `agents/uam/single_web.py` handles these going
-  forward.
+- Float labels (`"1.0"`), prefix labels (`"Output: 2"`) — repaired by
+  `claims_processing.cli.fix_corrupted_results`.
 
 Inspect and repair:
 
@@ -40,8 +39,8 @@ duplicate rows at the DB level.
 - **`get_evaluated_claim_ids` takes a `model_name` arg** — different models for
   the same agent accumulate as independent row sets.
 
-These rules exist because a bare `--clear` once wiped Bielik results for
-`uam_ga6`/`uam_ga7` before a llama re-run, losing data permanently.
+These rules exist because a bare `--clear` once wiped Bielik results for two of
+the expensive agents before a llama re-run, losing data permanently.
 
 Model suffixes in use: Bielik =
 `__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`, llama =

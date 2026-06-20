@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from claims_processing import paths
 from claims_processing.core.base_agent import BaseAgent, validate_result
 from claims_processing.monitoring.monitor import MonitoringAgent
 
@@ -83,36 +84,41 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # Konfiguracja benchmarków
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 BENCHMARKS: list[dict[str, str]] = [
-    {"name": "demagog", "input_db": "dataprep/demagog.db"},
-    {"name": "am_benchmark", "input_db": "dataprep/am_benchmark.db"},
+    {"name": "demagog", "input_db": str(paths.DEMAGOG_DB)},
+    {"name": "am_benchmark", "input_db": str(paths.AM_BENCHMARK_DB)},
 ]
 
-RESULTS_DIR = "results"
+RESULTS_DIR = str(paths.RESULTS_DIR)
 
 # ---------------------------------------------------------------------------
 # Tier classification — LLM calls per claim determine scheduling tier
 # ---------------------------------------------------------------------------
 
+# NOTE: this is only a legacy fallback for agents that do not declare an explicit
+# ``cost_tier`` class attribute (see ``_get_agent_tier``). All current UAM agents
+# declare ``cost_tier``. UAM numbering below reflects the post-discontinuation
+# scheme (old ga2 web agent archived as ``uam_ga_web_tool_arch``; old ga3–ga7 →
+# ga2–ga6). The ``dem_ga*`` names are unchanged (Demagog was not renumbered).
+
 # Agents with ≤1 LLM calls per claim — run on full dataset
 TIER1_AGENTS: frozenset[str] = frozenset({
-    "uam_ga1", "dem_ga1",  # single (1 call)
-    "uam_ga2", "dem_ga2",  # single_web (1 call)
-    "uam_ga3", "dem_ga3",  # single_bm25 (1 call)
+    "uam_ga1", "dem_ga1",                  # single (1 call)
+    "uam_ga2",                             # single_bm25 (1 call)
+    "uam_ga_web_tool_arch", "dem_ga2",     # single_web — discontinued for UAM (1 call)
+    "dem_ga3",                             # single_bm25 (1 call, demagog)
 })
 
 # Agents with 2 LLM calls per claim — moderate cost
 TIER2_AGENTS: frozenset[str] = frozenset({
-    "uam_ga4", "dem_ga4",  # rag_claim_decomp (2 calls)
-    "uam_ga5", "dem_ga5",  # bm25_claim_decomp (2 calls)
+    "uam_ga3", "dem_ga4",  # rag_claim_decomp (2 calls)
+    "uam_ga4", "dem_ga5",  # bm25_claim_decomp (2 calls)
 })
 
 # Agents with 4+ LLM calls per claim — expensive
 TIER3_AGENTS: frozenset[str] = frozenset({
-    "uam_ga6", "dem_ga6",            # fewshot_cot_rag (4-5 calls)
-    "uam_ga_debate", "uam_ga7", "dem_ga7",  # debate pipeline (7-8 calls)
+    "uam_ga5", "dem_ga6",                       # fewshot_cot_rag (4-5 calls)
+    "uam_ga6", "uam_ga_debate", "dem_ga7",      # debate pipeline (7-8 calls)
 })
 
 # Default limits for local mode
@@ -1080,18 +1086,16 @@ def _resolve_db_paths(
     ------
     (input_db_path, results_db_path)
     """
-    # Szukamy w konfiguracji
+    # Szukamy w konfiguracji (input_db już jest ścieżką bezwzględną z paths.py)
     for b in BENCHMARKS:
         if b["name"] == benchmark_name:
-            input_db = str(PROJECT_ROOT / b["input_db"])
-            results_db = str(
-                PROJECT_ROOT / RESULTS_DIR / f"results_{benchmark_name}.db"
-            )
+            input_db = b["input_db"]
+            results_db = str(paths.RESULTS_DIR / f"results_{benchmark_name}.db")
             return input_db, results_db
 
     # Fallback
-    input_db = str(PROJECT_ROOT / "dataprep" / f"{benchmark_name}.db")
-    results_db = str(PROJECT_ROOT / RESULTS_DIR / f"results_{benchmark_name}.db")
+    input_db = str(paths.BENCHMARKS_DIR / f"{benchmark_name}.db")
+    results_db = str(paths.RESULTS_DIR / f"results_{benchmark_name}.db")
     return input_db, results_db
 
 

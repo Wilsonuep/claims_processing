@@ -19,7 +19,7 @@ Imports are `claims_processing.<layer>.<module>`.
 src/claims_processing/
 ├── paths.py            # SINGLE SOURCE OF TRUTH for data/results/wiki paths
 ├── core/               # base_agent, llm_client, react  (+ retrieval/{bm25,rag})
-├── agents/uam/         # uam_ga1–uam_ga7
+├── agents/uam/         # uam_ga1–uam_ga6
 ├── pipeline/{scrape,prepare}/   # scrapers + DB builders/chunking/embedding
 ├── evaluation/         # eval_loop.py
 ├── monitoring/         # monitor.py
@@ -124,11 +124,21 @@ Full detail in [docs/architecture.md](docs/architecture.md). Key points:
   `completion_tokens`, `time_thought`, `raw_output`, `model_name`.
 - `core/llm_client.py` is a universal factory with a module-level `client`
   singleton; agents pass `model_override` to `make_client()` for multi-model runs.
-- `core/react.py` is the universal ReAct loop; `*_web.py` agents pass
-  `max_steps=8` (low step counts cause most `ERROR_MAX_STEPS`).
+- `core/react.py` is the universal ReAct loop (`max_steps=8` avoids most
+  `ERROR_MAX_STEPS`). The only ReAct/web agent, `single_web.py`, is **archived**
+  (see below); no active agent currently uses the web tool.
 - `core/retrieval/{bm25,rag}.py` use **process-level caches** (`_INDEX_CACHE`,
   `_MODEL_CACHE`, `_embed_cache`) to share the 4–6 GB BM25 index and embedding
   model across agents. Never load these twice in one process.
+- **Active roster (6 agents)**: ga1 `single` (zero-shot), ga2 `single_bm25`
+  (BM25), ga3 `rag_claim_decomp` (claim decomp + vector RAG), ga4
+  `bm25_claim_decomp` (claim decomp + BM25), ga5 `fewshot_cot_rag` (few-shot CoT
+  + RAG), ga6 `fewshot_cot_debate_rag` (debate + judge + RAG).
+- **Discontinued**: the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo)
+  was misconfigured and removed; archived as `uam_ga_web_tool_arch` in
+  `extras/discontinued/single_web.py`. The remaining agents were renumbered down
+  to ga1–ga6, and existing result rows were renamed accordingly
+  (`uam_ga3→uam_ga2`, …, `uam_ga7→uam_ga6`; old ga2 → `uam_ga_web_tool_arch`).
 - **Agent registration**: edit `_register_default_agents()` in
   `src/claims_processing/cli/run_eval_am_benchmark.py`.
 - **AM benchmark quirk**: agents use
@@ -165,30 +175,28 @@ See [docs/results_db.md](docs/results_db.md). Location:
 - **`get_evaluated_claim_ids` takes a `model_name` arg**.
 
 These exist because a bare `--clear` once permanently wiped Bielik results for
-`uam_ga6`/`uam_ga7` before a llama re-run. Bielik suffix:
-`__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`; llama: `__llama3.1-8b`.
+two of the expensive agents before a llama re-run. Model suffixes in use:
+Bielik = `__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`,
+llama = `__llama3.1-8b`, qwen = `__qwen2.5-7b`,
+PLLuM = `__hf.co-mradermacher-Llama-PLLuM-8B-instruct-GGUF-Q4_K_M`.
 
-### Current data state (2026-04-28, post-naming-sweep)
+### Current data state (2026-06-20, post agent-renumber)
 
-All rows in `agent_results` carry a `__<model-suffix>` (no un-suffixed legacy
-rows).
+All rows carry a `__<model-suffix>`. The agents were renumbered (old ga2 web
+agent archived as `uam_ga_web_tool_arch`; old ga3–ga7 → ga2–ga6) and the result
+rows in both `results_am_benchmark.db` and `results_am_subsample.db` were
+renamed to match. Current `agent_results` holds **uam_ga1–uam_ga6** plus the
+archived **uam_ga_web_tool_arch**, each across four models (Bielik, llama3.1:8b,
+qwen2.5:7b, PLLuM). Bielik and llama3.1 cover the full 18,820-row benchmark;
+qwen2.5 and PLLuM cover the 4,000-claim subset. Query live status with:
 
-| Agent | Bielik (Q4_K_M) | llama3.1:8b |
-|-------|-----------------|-------------|
-| uam_ga1 | complete (18,820) | complete (18,820) |
-| uam_ga2 | complete (18,820) | registered for run |
-| uam_ga3 | complete (18,820) | registered for run |
-| uam_ga4 | complete (18,820) | registered for run |
-| uam_ga5 | complete (18,820) | registered for run |
-| uam_ga6 | needs re-run (Bielik lost) | complete (18,820) |
-| uam_ga7 | needs re-run (Bielik lost) | resume from 3,397/18,820 |
-
-Bielik re-run for ga6/ga7 (after the llama batch, without `--clear`) — set
-`LLM_MODEL=hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M` in `.env` (or
-change `model_override` in `_register_default_agents()`), then:
 ```bash
-run-am-eval --agents uam_ga6,uam_ga7
+python -m claims_processing.cli.analyze_results
+python tests/eval_completeness_test.py
 ```
+
+`uam_ga_web_tool_arch__*` rows are retained for reference but the agent is no
+longer registered for runs.
 
 ## Archived assets (`extras/`)
 
