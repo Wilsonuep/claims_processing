@@ -117,22 +117,24 @@ def main():
                              "Domyślnie używa standardowych baz dla Demagog i AM Benchmark.")
     args = parser.parse_args()
 
-    # Lokacje folderów
-    uam_dir = PROJECT_ROOT / "agents_uam"
-    dem_dir = PROJECT_ROOT / "agents_dem"
-    
+    from claims_processing import paths
+
+    # Lokacje folderów agentów (UAM = aktywne, Demagog = zarchiwizowane w extras/)
+    uam_dir = PROJECT_ROOT / "src" / "claims_processing" / "agents" / "uam"
+    dem_dir = PROJECT_ROOT / "extras" / "demagog" / "agents_dem"
+
     # Lokacje baz
-    am_bench_input = PROJECT_ROOT / "data" / "am_benchmark.db"
-    demagog_input = PROJECT_ROOT / "data" / "demagog.db"
-    
+    am_bench_input = paths.AM_BENCHMARK_DB
+    demagog_input = paths.DEMAGOG_DB
+
     if args.results_db:
         # User explicitly passed a merged database
         results_db_path_am = Path(args.results_db)
         results_db_path_dem = Path(args.results_db)
     else:
         # Standard workflow databases
-        results_db_path_am = PROJECT_ROOT / "results" / "results_am_benchmark.db"
-        results_db_path_dem = PROJECT_ROOT / "results" / "results_demagog.db"
+        results_db_path_am = paths.RESULTS_AM_DB
+        results_db_path_dem = paths.RESULTS_DEMAGOG_DB
 
     # Wykrywamy agentów
     uam_agents = find_agent_names(uam_dir)

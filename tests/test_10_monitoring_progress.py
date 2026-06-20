@@ -22,7 +22,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from monitoring.monitor import MonitoringAgent, _fmt_duration
+from claims_processing.monitoring.monitor import MonitoringAgent, _fmt_duration
 
 
 # ---------------------------------------------------------------------------

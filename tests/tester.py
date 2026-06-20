@@ -2,7 +2,6 @@ import sys
 import time
 
 from test_01_wikipedia_db import test_wikipedia_db
-from test_02_demagog_db import test_demagog_db
 from test_03_am_benchmark_db import test_am_benchmark_db
 from test_04_eval_local import test_eval_local
 from test_05_eval_cloud import test_eval_cloud
@@ -21,7 +20,6 @@ def run_tests():
 
     tests = [
         ("Rozbicie i wektoryzacja Wikipedii do bazy", test_wikipedia_db),
-        ("Załadunek wyników Demagog JSON do bazy DB", test_demagog_db),
         ("Załadunek AM Benchmark CSV do bazy DB", test_am_benchmark_db),
         ("Evaluacja agentowa (tryb lokalny - tiered)", test_eval_local),
         ("Evaluacja agentowa (tryb w chmurze - parallel)", test_eval_cloud),

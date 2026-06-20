@@ -4,9 +4,10 @@ import json
 import sqlite3
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# demagog_db.py lives alongside this archived test in extras/demagog/
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from dataprep.demagog_db import init_db, ingest_demagog
+from demagog_db import init_db, ingest_demagog
 
 def test_demagog_db():
     start_time = time.time()

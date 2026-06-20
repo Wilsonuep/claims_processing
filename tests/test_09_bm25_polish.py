@@ -15,7 +15,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gen_agent.bm25 import default_tokenize, BM25Index, _pl_stem, _PL_STOPWORDS
+from claims_processing.core.retrieval.bm25 import default_tokenize, BM25Index, _pl_stem, _PL_STOPWORDS
 
 
 def test_bm25_polish() -> tuple[bool, float, str | None]:
