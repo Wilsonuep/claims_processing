@@ -26,11 +26,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_RESULTS_DB = PROJECT_ROOT / "results" / "results_am_benchmark.db"
-BENCHMARK_DB = PROJECT_ROOT / "data" / "am_benchmark.db"
-SUBSET_DB = PROJECT_ROOT / "data" / "am_benchmark_4k.db"
-OUTPUT_DB = PROJECT_ROOT / "results" / "results_am_subsample.db"
+from claims_processing import paths
+
+SOURCE_RESULTS_DB = paths.RESULTS_AM_DB
+BENCHMARK_DB = paths.AM_BENCHMARK_DB
+SUBSET_DB = paths.AM_BENCHMARK_4K_DB
+OUTPUT_DB = paths.RESULTS_AM_SUBSAMPLE_DB
 
 BENCHMARK_NAME = "am_benchmark"
 BASE_AGENTS = [f"uam_ga{i}" for i in range(1, 8)]

@@ -3,9 +3,9 @@ schedule_backup.py — run backup_dbs every 3 hours in the terminal.
 
 Usage
 -----
-    python -m scripts.schedule_backup
-    python -m scripts.schedule_backup --interval 6      # every 6 hours
-    python -m scripts.schedule_backup --dest E:\\backup
+    python tools/schedule_backup.py
+    python tools/schedule_backup.py --interval 6      # every 6 hours
+    python tools/schedule_backup.py --dest E:\\backup
 
 Keep this terminal open while evals are running. Ctrl+C to stop.
 """
@@ -29,10 +29,11 @@ log = logging.getLogger(__name__)
 
 PYTHON = Path(sys.executable)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BACKUP_SCRIPT = PROJECT_ROOT / "tools" / "backup_dbs.py"
 
 
 def run_backup(dest: Path | None) -> bool:
-    cmd = [str(PYTHON), "-m", "scripts.backup_dbs"]
+    cmd = [str(PYTHON), str(BACKUP_SCRIPT)]
     if dest:
         cmd += ["--dest", str(dest)]
     log.info("Starting backup: %s", " ".join(cmd))

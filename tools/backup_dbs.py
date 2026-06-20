@@ -35,12 +35,15 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from claims_processing import paths
 
-# DBs to back up — relative to PROJECT_ROOT
+PROJECT_ROOT = paths.PROJECT_ROOT
+
+# DBs to back up — relative to PROJECT_ROOT (data/ is a nested hierarchy now,
+# so recurse; wiki.db is intentionally excluded below as it is enormous).
 _DB_GLOBS = [
     "results/*.db",
-    "data/*.db",
+    "data/benchmarks/*.db",
 ]
 
 DEFAULT_DEST = Path("D:/claims_backup")

@@ -216,10 +216,12 @@ def main(db_path: str) -> None:
 
 
 if __name__ == "__main__":
+    from claims_processing import paths
+
     parser = argparse.ArgumentParser(description="Analyze corrupted results in the benchmark DB.")
     parser.add_argument(
         "--db",
-        default="results/results_am_benchmark.db",
+        default=str(paths.RESULTS_AM_DB),
         help="Path to SQLite results database",
     )
     args = parser.parse_args()

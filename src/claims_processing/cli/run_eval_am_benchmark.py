@@ -30,10 +30,11 @@ from pathlib import Path
 # Konfiguracja
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from claims_processing import paths
+
 BENCHMARK_NAME = "am_benchmark"
-INPUT_DB_PATH = str(PROJECT_ROOT / "data" / "am_benchmark.db")
-RESULTS_DB_PATH = str(PROJECT_ROOT / "results" / "results_am_benchmark.db")
+INPUT_DB_PATH = str(paths.AM_BENCHMARK_DB)
+RESULTS_DB_PATH = str(paths.RESULTS_AM_DB)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,8 +59,8 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 #
 # Przykład:
 #
-#   from eval.eval_loop import register_agent
-#   from agents_uam.my_agent import MyUamAgent
+#   from claims_processing.evaluation.eval_loop import register_agent
+#   from claims_processing.agents.uam.my_agent import MyUamAgent
 #   register_agent(MyUamAgent())
 #
 # Na razie rejestr jest pusty — dodaj agentów poniżej,
@@ -100,14 +101,14 @@ def _get_completed_pairs(input_db_path: str = INPUT_DB_PATH) -> set[tuple[str, s
 
 def _register_default_agents() -> None:
     # Prereq: `ollama pull hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M` on this host.
-    from eval.eval_loop import register_agent
-    from agents_uam.single import SingleAgent
-    from agents_uam.single_web import SingleWebAgent
-    from agents_uam.single_bm25 import SingleBM25Agent
-    from agents_uam.rag_claim_decomp import ClaimDecompRAGAgent
-    from agents_uam.bm25_claim_decomp import ClaimDecompBM25Agent
-    from agents_uam.fewshot_cot_rag import FewShotCoTAgent
-    from agents_uam.fewshot_cot_debate_rag import DebateCoTAgent
+    from claims_processing.evaluation.eval_loop import register_agent
+    from claims_processing.agents.uam.single import SingleAgent
+    from claims_processing.agents.uam.single_web import SingleWebAgent
+    from claims_processing.agents.uam.single_bm25 import SingleBM25Agent
+    from claims_processing.agents.uam.rag_claim_decomp import ClaimDecompRAGAgent
+    from claims_processing.agents.uam.bm25_claim_decomp import ClaimDecompBM25Agent
+    from claims_processing.agents.uam.fewshot_cot_rag import FewShotCoTAgent
+    from claims_processing.agents.uam.fewshot_cot_debate_rag import DebateCoTAgent
 
     MODEL = "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M"
     register_agent(SingleAgent(model_override=MODEL))           # uam_ga1  tier 1
@@ -182,17 +183,17 @@ def main() -> None:
 
     input_db_path = INPUT_DB_PATH
     if args.subset:
-        input_db_path = str(PROJECT_ROOT / "data" / "am_benchmark_4k.db")
+        input_db_path = str(paths.AM_BENCHMARK_4K_DB)
         if not os.path.exists(input_db_path):
             log.error(
                 "Subset DB nie istnieje: %s\n"
-                "  Uruchom najpierw: python scripts/build_am_benchmark_subset.py",
+                "  Uruchom najpierw: python tools/build_am_benchmark_subset.py",
                 input_db_path,
             )
             return
         log.info("Subset mode: używam %s", input_db_path)
 
-    from eval.eval_loop import (
+    from claims_processing.evaluation.eval_loop import (
         eval_benchmark,
         eval_benchmark_cloud,
         eval_benchmark_local,

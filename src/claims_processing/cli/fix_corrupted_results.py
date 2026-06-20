@@ -232,8 +232,10 @@ def main(db_path: str, dry_run: bool, skip_mining: bool) -> None:
 
 
 if __name__ == "__main__":
+    from claims_processing import paths
+
     parser = argparse.ArgumentParser(description="Fix corrupted model_label values in benchmark DB.")
-    parser.add_argument("--db", default="results/results_am_benchmark.db")
+    parser.add_argument("--db", default=str(paths.RESULTS_AM_DB))
     parser.add_argument("--dry-run", action="store_true", help="Preview without modifying DB")
     parser.add_argument("--skip-mining", action="store_true", help="Skip slow trajectory-mining pass")
     args = parser.parse_args()

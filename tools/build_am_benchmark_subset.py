@@ -20,9 +20,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SOURCE_DB = PROJECT_ROOT / "data" / "am_benchmark.db"
-OUTPUT_DB = PROJECT_ROOT / "data" / "am_benchmark_4k.db"
+from claims_processing import paths
+
+SOURCE_DB = paths.AM_BENCHMARK_DB
+OUTPUT_DB = paths.AM_BENCHMARK_4K_DB
 SAMPLE_SIZE = 4000
 SEED = 42
 
