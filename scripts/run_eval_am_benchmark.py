@@ -99,7 +99,7 @@ def _get_completed_pairs(input_db_path: str = INPUT_DB_PATH) -> set[tuple[str, s
 
 
 def _register_default_agents() -> None:
-    # Prereq: `ollama pull qwen2.5:7b` must have been run on this host.
+    # Prereq: `ollama pull hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M` on this host.
     from eval.eval_loop import register_agent
     from agents_uam.single import SingleAgent
     from agents_uam.single_web import SingleWebAgent
@@ -109,7 +109,7 @@ def _register_default_agents() -> None:
     from agents_uam.fewshot_cot_rag import FewShotCoTAgent
     from agents_uam.fewshot_cot_debate_rag import DebateCoTAgent
 
-    MODEL = "qwen2.5:7b"
+    MODEL = "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M"
     register_agent(SingleAgent(model_override=MODEL))           # uam_ga1  tier 1
     register_agent(SingleWebAgent(model_override=MODEL))        # uam_ga2  tier 1
     register_agent(SingleBM25Agent(model_override=MODEL))       # uam_ga3  tier 1
