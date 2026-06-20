@@ -110,8 +110,8 @@ def parse_article_text(text: str) -> list[Section]:
 
 def main():
     parser = argparse.ArgumentParser(description="Zbuduj bazę wektorową Wikipedii z pliku JSONL.")
-    parser.add_argument("--input", default="polish_wikipedia_articles.jsonl", help="Plik wejściowy JSONL ze zrzutu Wikipedii")
-    parser.add_argument("--db", default="data/wiki.db", help="Ścieżka do docelowej bazy danych sqlite (vector info)")
+    parser.add_argument("--input", default="data/raw/polish_wikipedia_articles.jsonl", help="Plik wejściowy JSONL ze zrzutu Wikipedii")
+    parser.add_argument("--db", default="data/wiki/wiki.db", help="Ścieżka do docelowej bazy danych sqlite (vector info)")
     parser.add_argument("--limit", type=int, default=None, help="Liczba artykułów do przetworzenia w ramach bazy (do celów testowych)")
     parser.add_argument("--embed-model", default="sdadas/mmlw-retrieval-roberta-large-v2", help="Rodzaj modelu wczytywanego z HF (sentence-transformers)")
     parser.add_argument("--batch-size", type=int, default=500, help="Number of chunks to accumulate before embedding + inserting")
