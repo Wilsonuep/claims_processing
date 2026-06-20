@@ -1,13 +1,22 @@
+# --- Environment & secrets ---
 .env
 .venv/
+.claude/
+
+# --- Python build artifacts ---
 __pycache__/
 *.pyc
-data/am_benchmark.csv
-demagog_wypowiedzi_general.json
-demagog_wypowiedzi_detailed.json
-results/
+*.egg-info/
+build/
+dist/
+
+# --- Data (full hierarchy, all generated/downloaded) ---
+data/raw/
+data/benchmarks/
+data/wiki/
 *.jsonl
 *.db
 wiki.db-journal
 
-.claude/
+# --- Results ---
+results/
