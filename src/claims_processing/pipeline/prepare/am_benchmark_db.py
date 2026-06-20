@@ -8,14 +8,14 @@ Wczytuje ``am_benchmark.csv`` i zapisuje w osobnej bazie
 Użycie
 ------
     # CLI
-    python am_benchmark_db.py --db data/am_benchmark.db \
-        --input data/am_benchmark.csv
+    python -m claims_processing.pipeline.prepare.am_benchmark_db \
+        --db data/benchmarks/am_benchmark.db --input data/benchmarks/am_benchmark.csv
 
     # Moduł
-    from am_benchmark_db import init_db, ingest_am_benchmark
+    from claims_processing.pipeline.prepare.am_benchmark_db import init_db, ingest_am_benchmark
 
-    conn = init_db("data/am_benchmark.db")
-    ingest_am_benchmark("data/am_benchmark.csv", conn)
+    conn = init_db("data/benchmarks/am_benchmark.db")
+    ingest_am_benchmark("data/benchmarks/am_benchmark.csv", conn)
     conn.close()
 
 Wymaga
@@ -354,12 +354,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default="data/am_benchmark.db",
-        help="Ścieżka do pliku bazy SQLite (domyślnie: data/am_benchmark.db).",
+        default="data/benchmarks/am_benchmark.db",
+        help="Ścieżka do pliku bazy SQLite (domyślnie: data/benchmarks/am_benchmark.db).",
     )
     parser.add_argument(
         "--input",
-        default="data/am_benchmark.csv",
+        default="data/benchmarks/am_benchmark.csv",
         help="Ścieżka do pliku CSV z benchmarkiem AM.",
     )
     args = parser.parse_args()

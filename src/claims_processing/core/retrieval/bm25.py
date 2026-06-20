@@ -27,7 +27,7 @@ Użycie
     results = bm25.search("foo", k=3)
 
     # --- z bazy SQLite (Wikipedia wiki_chunks) ---
-    bm25 = BM25Index.from_sqlite("dataprep/wiki.db")
+    bm25 = BM25Index.from_sqlite("data/wiki/wiki.db")
 
     # --- z bazy SQLite (Demagog claims) ---
     bm25 = BM25Index.from_sqlite(

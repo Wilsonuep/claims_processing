@@ -32,12 +32,12 @@ VENV_DIR = PROJECT_ROOT / ".venv"
 
 # Pakiety wymagane przez poszczególne moduły repozytorium:
 #
-#   agents_uam/*            → together, python-dotenv
-#   data/am_benchmark_loader.py → pandas
-#   datascrap/*             → cloudscraper, beautifulsoup4
-#   dataprep/wikipedia_embedding.py → sentence-transformers, tqdm, numpy
-#   dataprep/wikipedia_db.py → sqlite-vec, pysqlite3-binary
-#   eval/uam_benchmark_loop.py → pandas, together, python-dotenv
+#   agents/uam/*                          → together, python-dotenv
+#   pipeline/prepare/am_benchmark_loader  → pandas
+#   pipeline/scrape/*                     → cloudscraper, beautifulsoup4
+#   pipeline/prepare/wikipedia_embedding  → sentence-transformers, tqdm, numpy
+#   pipeline/prepare/wikipedia_db         → sqlite-vec, pysqlite3-binary
+#   evaluation/eval_loop                  → pandas, together, python-dotenv
 #
 REQUIREMENTS: list[str] = [
     # --- API & CLI ---
@@ -148,6 +148,14 @@ def install_packages() -> None:
     )
 
     print(f"\n  [OK] Zainstalowano {len(REQUIREMENTS)} pakietow")
+
+    # Editable install of the claims_processing package (src/ layout) so that
+    # `import claims_processing` and the `run-am-eval` console script work.
+    _run(
+        [str(python_path), "-m", "pip", "install", "-e", "."],
+        "Instalacja pakietu claims_processing (editable, -e .)",
+    )
+    print("  [OK] Zainstalowano pakiet claims_processing (editable)")
 
 
 def generate_requirements_txt() -> None:
