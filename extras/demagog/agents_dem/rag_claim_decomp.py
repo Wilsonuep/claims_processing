@@ -7,8 +7,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from gen_agent.llm_client import client, MODEL
-from gen_agent.base_agent import BaseAgent
+from claims_processing.core.llm_client import client, MODEL
+from claims_processing.core.base_agent import BaseAgent
 from agents_dem.prompts import FACTCHECK_PROMPT
 
 load_dotenv()
@@ -19,9 +19,11 @@ model = MODEL
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _WIKI_DB_PATH = os.getenv(
-    "BM25_WIKI_DB",
+    "RAG_WIKI_DB",
     os.path.join(_PROJECT_ROOT, "dataprep", "wiki.db"),
 )
+
+_RAG_MODE = os.getenv("RAG_MODE", "bm25")
 
 DECOMPOSER_PROMPT = """\
 Jesteś ekspertem od analizy twierdzeń (fact-checking).
@@ -42,7 +44,7 @@ Przykład odpowiedzi:
 VERIFIER_PROMPT = FACTCHECK_PROMPT + """
 
 DODATKOWE INSTRUKCJE:
-Otrzymujesz oryginalne twierdzenie (statement) do weryfikacji. Oprócz tego otrzymujesz jego dekompozycję oraz dowody (kontekst z lokalnej bazy wiedzy).
+Otrzymujesz oryginalne twierdzenie (statement) do weryfikacji. Oprócz tego otrzymujesz jego dekompozycję oraz dowody (kontekst z lokalnej bazy wiedzy RAG).
 Na podstawie powiązanych dowodów i swojej wiedzy zastosuj się do standardowych procedur. Zwróć finalny JSON.
 """
 
@@ -111,30 +113,40 @@ def decompose_claim(claim_text: str) -> tuple[list[str], int, int, int]:
     log.info("Decomposer: %d pod-twierdzeń.", len(sub_claims))
     return sub_claims, total, prompt, completion
 
-_bm25_index = None
+_rag_retriever = None
 
-def _get_bm25():
-    global _bm25_index
-    if _bm25_index is None:
-        from gen_agent.bm25 import BM25Index
-        _bm25_index = BM25Index.from_sqlite(_WIKI_DB_PATH)
-    return _bm25_index
+def _get_rag():
+    global _rag_retriever
+    if _rag_retriever is None:
+        from claims_processing.core.retrieval.rag import RAGRetriever
+        rag_kwargs: dict[str, Any] = {
+            "mode": _RAG_MODE,
+            "bm25_db_path": _WIKI_DB_PATH,
+            "text_field": "text",
+            "title_field": "title",
+            "section_field": "section_title",
+            "id_field": "chunk_id",
+        }
+        if _RAG_MODE in ("vector", "hybrid"):
+            rag_kwargs["vector_db_path"] = _WIKI_DB_PATH
+        _rag_retriever = RAGRetriever(**rag_kwargs)
+    return _rag_retriever
 
 def retrieve_contexts(
     sub_claims: list[str],
     k_per_claim: int = 3,
     max_context_chars: int = 2000,
 ) -> list[dict[str, Any]]:
-    bm25 = _get_bm25()
+    rag = _get_rag()
     results: list[dict[str, Any]] = []
     for sc in sub_claims:
-        context = bm25.search_and_format(sc, k=k_per_claim, max_context_chars=max_context_chars)
+        context = rag.retrieve_and_format(sc, k=k_per_claim, max_context_chars=max_context_chars)
         results.append({
             "sub_claim": sc,
             "context": context,
-            "num_results": len(bm25.search(sc, k=k_per_claim)),
+            "num_results": len(rag.retrieve(sc, k=k_per_claim)),
         })
-    log.info("BM25 Retriever: kontekst dla %d pod-twierdzeń.", len(results))
+    log.info("Retriever: pobrano kontekst dla %d pod-twierdzeń.", len(results))
     return results
 
 def verify_claim(
@@ -160,14 +172,14 @@ def verify_claim(
     return answer, total, prompt, completion
 
 AGENT_CONFIG = {
-    "name": "dem_ga5",
+    "name": "dem_ga4",
     "model": model,
-    "system_prompt": "Multi-agent: Decomposer → BM25 Retriever → Verifier",
-    "tools": ["bm25_wikipedia", "claim_decomposition"],
+    "system_prompt": "Multi-agent: Decomposer → RAG Retriever → Verifier",
+    "tools": ["rag_hybrid", "claim_decomposition"],
 }
 
-BM25_K_PER_CLAIM: int = 3
-BM25_MAX_CONTEXT_CHARS: int = 2000
+RAG_K_PER_CLAIM: int = 3
+RAG_MAX_CONTEXT_CHARS: int = 2000
 
 def ask(question: str) -> dict:
     total_tokens = 0
@@ -181,8 +193,8 @@ def ask(question: str) -> dict:
 
     evidence = retrieve_contexts(
         sub_claims,
-        k_per_claim=BM25_K_PER_CLAIM,
-        max_context_chars=BM25_MAX_CONTEXT_CHARS,
+        k_per_claim=RAG_K_PER_CLAIM,
+        max_context_chars=RAG_MAX_CONTEXT_CHARS,
     )
 
     answer, t3_total, t3_prompt, t3_comp = verify_claim(question, evidence)
@@ -202,12 +214,12 @@ def ask(question: str) -> dict:
         ],
     }
 
-class ClaimDecompBM25Agent(BaseAgent):
+class ClaimDecompRAGAgent(BaseAgent):
     name = AGENT_CONFIG["name"]
     cost_tier = 2
 
     def __init__(self, model_override: str | None = None) -> None:
-        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        from claims_processing.core.llm_client import make_client, MODEL as _DEFAULT_MODEL
         if model_override is not None:
             self._override_client, self._override_model = make_client(model_override)
             suffix = model_override.replace("/", "-").replace(":", "-")
@@ -220,7 +232,7 @@ class ClaimDecompBM25Agent(BaseAgent):
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         if self._override_client is not None:
-            import agents_dem.bm25_claim_decomp as _m
+            import agents_dem.rag_claim_decomp as _m
             _orig_client, _orig_model = _m.client, _m.model
             _m.client = self._override_client
             _m.model = self._override_model

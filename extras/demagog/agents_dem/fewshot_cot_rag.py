@@ -8,8 +8,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from gen_agent.llm_client import client, MODEL
-from gen_agent.base_agent import BaseAgent
+from claims_processing.core.llm_client import client, MODEL
+from claims_processing.core.base_agent import BaseAgent
 from agents_dem.prompts import FACTCHECK_PROMPT
 
 load_dotenv()
@@ -173,7 +173,7 @@ _rag_retriever = None
 def _get_rag():
     global _rag_retriever
     if _rag_retriever is None:
-        from gen_agent.rag import RAGRetriever
+        from claims_processing.core.retrieval.rag import RAGRetriever
         rag_kwargs = {
             "mode": _RAG_MODE,
             "bm25_db_path": _WIKI_DB_PATH,
@@ -186,7 +186,7 @@ def _get_rag():
     return _rag_retriever
 
 def retrieve_evidence(sub_claims: list[str]) -> list[dict[str, Any]]:
-    from gen_agent.rag import RAGRetriever
+    from claims_processing.core.retrieval.rag import RAGRetriever
     rag = _get_rag()
     results = []
     for sc in sub_claims:
@@ -269,7 +269,7 @@ class FewShotCoTAgent(BaseAgent):
     cost_tier = 3
 
     def __init__(self, model_override: str | None = None) -> None:
-        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        from claims_processing.core.llm_client import make_client, MODEL as _DEFAULT_MODEL
         if model_override is not None:
             self._override_client, self._override_model = make_client(model_override)
             suffix = model_override.replace("/", "-").replace(":", "-")

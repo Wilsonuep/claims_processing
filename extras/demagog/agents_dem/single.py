@@ -5,60 +5,36 @@ import time
 from typing import Any
 from dotenv import load_dotenv
 
-from gen_agent.bm25 import BM25Index
-from gen_agent.llm_client import client, MODEL
-from gen_agent.base_agent import BaseAgent
+from claims_processing.core.llm_client import client, MODEL
+from claims_processing.core.base_agent import BaseAgent
 from agents_dem.prompts import FACTCHECK_PROMPT
 
 load_dotenv()
+
 log = logging.getLogger(__name__)
+
+"""
+Najbardziej podstawowa wersja agenta.
+Brak narzędzi.
+Dostosowany do formatu Demagog (wynik to JSON z etykietą PRAWDA/FAŁSZ/itd.).
+"""
 
 model = MODEL
 
-_WIKI_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "dataprep",
-    "wiki.db",
-)
-
-_bm25_index: BM25Index | None = None
-
-def _get_bm25() -> BM25Index:
-    global _bm25_index
-    if _bm25_index is None:
-        db_path = os.getenv("BM25_WIKI_DB", _WIKI_DB_PATH)
-        _bm25_index = BM25Index.from_sqlite(db_path)
-    return _bm25_index
-
 AGENT_CONFIG = {
-    "name": "dem_ga3",
+    "name": "dem_ga1",
     "model": model,
-    "system_prompt": FACTCHECK_PROMPT + "\nWykorzystujesz dostarczony kontekst z lokalnej bazy wiedzy. Jeśli kontekst nie zawiera wystarczających informacji, polegaj na swojej wiedzy.",
-    "tools": ["bm25_wikipedia"],
+    "system_prompt": FACTCHECK_PROMPT,
+    "tools": [],
 }
 
-BM25_TOP_K: int = 5
-BM25_MAX_CONTEXT_CHARS: int = 3000
-
 def ask(question: str) -> dict:
-    bm25 = _get_bm25()
-    context = bm25.search_and_format(
-        question, k=BM25_TOP_K, max_context_chars=BM25_MAX_CONTEXT_CHARS
-    )
-
-    if context:
-        user_content = (
-            f"Kontekst referencyjny:\n{context}\n\n"
-            f"Wypowiedź:\n{question}"
-        )
-    else:
-        user_content = question
-
+    # Wymuszamy format JSON za pomocą mechanizmu Together AI / OpenAI
     response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": AGENT_CONFIG["system_prompt"]},
-            {"role": "user", "content": json.dumps({"statement": user_content}, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps({"statement": question}, ensure_ascii=False)},
         ],
         response_format={"type": "json_object"},
     )
@@ -71,12 +47,12 @@ def ask(question: str) -> dict:
         "completion_tokens": usage.completion_tokens if usage else 0,
     }
 
-class SingleBM25Agent(BaseAgent):
+class SingleAgent(BaseAgent):
     name = AGENT_CONFIG["name"]
     cost_tier = 1
 
     def __init__(self, model_override: str | None = None) -> None:
-        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        from claims_processing.core.llm_client import make_client, MODEL as _DEFAULT_MODEL
         if model_override is not None:
             self._override_client, self._override_model = make_client(model_override)
             suffix = model_override.replace("/", "-").replace(":", "-")
@@ -89,7 +65,7 @@ class SingleBM25Agent(BaseAgent):
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         if self._override_client is not None:
-            import agents_dem.single_bm25 as _m
+            import agents_dem.single as _m
             _orig_client, _orig_model = _m.client, _m.model
             _m.client = self._override_client
             _m.model = self._override_model

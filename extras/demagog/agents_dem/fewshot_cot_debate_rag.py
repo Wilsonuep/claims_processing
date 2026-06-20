@@ -7,7 +7,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from gen_agent.base_agent import BaseAgent
+from claims_processing.core.base_agent import BaseAgent
 from agents_dem.prompts import FACTCHECK_PROMPT
 
 from agents_dem.fewshot_cot_rag import (
@@ -153,7 +153,7 @@ class DebateCoTAgent(BaseAgent):
     cost_tier = 3  # 7-8 LLM calls per claim
 
     def __init__(self, model_override: str | None = None) -> None:
-        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        from claims_processing.core.llm_client import make_client, MODEL as _DEFAULT_MODEL
         if model_override is not None:
             self._override_client, self._override_model = make_client(model_override)
             suffix = model_override.replace("/", "-").replace(":", "-")

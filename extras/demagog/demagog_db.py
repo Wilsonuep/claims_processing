@@ -54,7 +54,7 @@ def _get_monitoring():
     global _monitoring
     if _monitoring is None:
         try:
-            from monitoring.monitor import MonitoringAgent
+            from claims_processing.monitoring.monitor import MonitoringAgent
             _monitoring = MonitoringAgent()
         except Exception:
             class _NoOp:

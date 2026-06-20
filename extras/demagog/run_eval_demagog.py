@@ -30,10 +30,11 @@ from pathlib import Path
 # Konfiguracja
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from claims_processing import paths
+
 BENCHMARK_NAME = "demagog"
-INPUT_DB_PATH = str(PROJECT_ROOT / "dataprep" / "demagog.db")
-RESULTS_DB_PATH = str(PROJECT_ROOT / "results" / "results_demagog.db")
+INPUT_DB_PATH = str(paths.DEMAGOG_DB)
+RESULTS_DB_PATH = str(paths.RESULTS_DEMAGOG_DB)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,7 +59,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 #
 # Przykład:
 #
-#   from eval.eval_loop import register_agent
+#   from claims_processing.evaluation.eval_loop import register_agent
 #   from agents_dem.my_agent import MyDemagogAgent
 #   register_agent(MyDemagogAgent())
 #
@@ -90,7 +91,7 @@ def _get_completed_pairs() -> set[tuple[str, str]]:
 
 
 def _register_default_agents(models: list[str] | None = None) -> None:
-    from eval.eval_loop import register_agent
+    from claims_processing.evaluation.eval_loop import register_agent
     from agents_dem.single import SingleAgent
     from agents_dem.single_web import SingleWebAgent
     from agents_dem.single_bm25 import SingleBM25Agent
@@ -176,7 +177,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    from eval.eval_loop import (
+    from claims_processing.evaluation.eval_loop import (
         eval_benchmark,
         eval_benchmark_cloud,
         eval_benchmark_local,

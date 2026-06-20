@@ -5,9 +5,9 @@ import time
 from typing import Any
 from dotenv import load_dotenv
 
-from gen_agent.llm_client import MODEL
-from gen_agent.base_agent import BaseAgent
-from gen_agent.react import run_react_agent
+from claims_processing.core.llm_client import MODEL
+from claims_processing.core.base_agent import BaseAgent
+from claims_processing.core.react import run_react_agent
 from agents_dem.prompts import FACTCHECK_PROMPT
 
 try:
@@ -77,7 +77,7 @@ class SingleWebAgent(BaseAgent):
     cost_tier = 1
 
     def __init__(self, model_override: str | None = None) -> None:
-        from gen_agent.llm_client import make_client, MODEL as _DEFAULT_MODEL
+        from claims_processing.core.llm_client import make_client, MODEL as _DEFAULT_MODEL
         if model_override is not None:
             _, self._model = make_client(model_override)
             suffix = model_override.replace("/", "-").replace(":", "-")
