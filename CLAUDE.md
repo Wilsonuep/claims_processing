@@ -4,183 +4,203 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Polish-language claim verification / fact-checking benchmark framework. Two benchmark families: **UAM** (AM-CAI multiple-choice, labels 0–3) and **Demagog** (Polish fact-checks, labels PRAWDA/CZĘŚCIOWA_PRAWDA/FAŁSZ/MANIPULACJA/NIEWERYFIKOWALNE). Agents range from zero-shot to multi-step ReAct + RAG pipelines.
+Polish-language claim verification / fact-checking benchmark framework. The
+**active** benchmark is **AM/UAM** (AMU-CAI multiple-choice, labels 0–3). A
+second family, **Demagog** (Polish fact-checks, text labels), is **archived**
+under `extras/demagog/` and is not part of the active workflow. Agents range
+from zero-shot to multi-step ReAct + RAG pipelines.
+
+## Repository layout (src/ package)
+
+All active code is one installable package, `claims_processing`, under `src/`.
+Imports are `claims_processing.<layer>.<module>`.
+
+```
+src/claims_processing/
+├── paths.py            # SINGLE SOURCE OF TRUTH for data/results/wiki paths
+├── core/               # base_agent, llm_client, react  (+ retrieval/{bm25,rag})
+├── agents/uam/         # uam_ga1–uam_ga6
+├── pipeline/{scrape,prepare}/   # scrapers + DB builders/chunking/embedding
+├── evaluation/         # eval_loop.py
+├── monitoring/         # monitor.py
+└── cli/                # run_eval_am_benchmark (entry point) + analyze/fix/merge
+tools/        # operational scripts (backup, subset/subsample builders)
+tests/        # integration suite
+examples/     # .env.example
+docs/         # architecture / data_pipeline / running_evaluations / results_db
+notebooks/    # exploratory + evaluation analysis
+extras/       # archived: demagog/, local_builder/, oneoff/
+data/{raw,benchmarks,wiki}/   # datasets + wiki.db (gitignored)
+results/      # result DBs (gitignored)
+```
+
+**Path rule:** never hardcode `data/...` or `results/...` paths or recompute
+`PROJECT_ROOT` via `Path(__file__).parent.parent`. Import from
+`claims_processing.paths` (`AM_BENCHMARK_DB`, `AM_BENCHMARK_4K_DB`, `WIKI_DB`,
+`RESULTS_AM_DB`, `bm25_wiki_db()`, `rag_wiki_db()`, …). The data hierarchy and
+deep package nesting are both safe to change because every path resolves there.
 
 ## Setup
 
 ```bash
-python loader.py          # creates .venv, installs all deps
+python loader.py          # creates .venv, installs deps, AND `pip install -e .`
 python loader.py --force  # rebuild from scratch
 ```
 
-Copy `.env.example` to `.env`. Key env vars:
+`pip install -e .` (run by loader.py) is **required** — without the editable
+install `import claims_processing` fails. Copy `examples/.env.example` to `.env`
+at the repo root. Key env vars:
 - `LLM_BACKEND` — `together` (default) | `ollama` | `vllm` | `llamacpp`
 - `LLM_MODEL` — model name string
 - `together_api_key` — required for cloud mode
-- `BM25_WIKI_DB`, `RAG_WIKI_DB` — paths to wiki.db for retrieval agents
-- `STRIP_THINKING_TAGS` — comma-separated tags to strip (default: `think,reasoning,scratchpad`)
+- `BM25_WIKI_DB`, `RAG_WIKI_DB` — wiki.db paths (default `data/wiki/wiki.db`)
+- `STRIP_THINKING_TAGS` — tags to strip (default `think,reasoning,scratchpad`)
 - `MONITORING_ACTIVE`, `BRRR_WEBHOOK_URL`, `MACHINE_NAME` — push notifications
 
-## Running Evaluations
+## Running evaluations
 
 ```bash
-# Run AM benchmark (primary)
-python scripts/run_eval_am_benchmark.py
-python scripts/run_eval_am_benchmark.py --limit 10 --agents uam_ga1,uam_ga2 --models llama3.1:8b
+# AM benchmark (primary). Console script `run-am-eval` == the module form.
+python -m claims_processing.cli.run_eval_am_benchmark
+run-am-eval --limit 10 --agents uam_ga1,uam_ga2 --models llama3.1:8b
+run-am-eval --subset            # use data/benchmarks/am_benchmark_4k.db
 
-# Run Demagog benchmark
-python scripts/run_eval_demagog.py
-python scripts/run_eval_demagog.py --limit 10
-
-# Parallel cloud mode / local tiered mode are set inside the scripts
 # Merge results from multiple machines
-python -m scripts.merge_results --target results/merged.db --sources results/results_am_benchmark.db other.db
+python -m claims_processing.cli.merge_results --target results/merged.db \
+    --sources results/results_am_benchmark.db other.db
 
-# Direct eval-loop CLI (advanced — wrappers above call into this)
-python -m eval.eval_loop --benchmarks am_benchmark --agents uam_ga1,uam_ga2
-python -m eval.eval_loop --mode cloud --workers 10
-python -m eval.eval_loop --mode local --tier2-limit 500 --tier3-limit 100
-python -m eval.eval_loop --clear --export-csv   # destructive; scope with --agents
+# Generic eval-loop CLI (advanced — wrappers above call into this)
+python -m claims_processing.evaluation.eval_loop --benchmarks am_benchmark --agents uam_ga1,uam_ga2
+python -m claims_processing.evaluation.eval_loop --mode cloud --workers 10
+python -m claims_processing.evaluation.eval_loop --clear --export-csv   # destructive; scope with --agents
 
-# Analyze corrupted results
-python scripts/analyze_results.py
-python scripts/fix_corrupted_results.py --dry-run
-python scripts/fix_corrupted_results.py
+# Analyze / repair corrupted results
+python -m claims_processing.cli.analyze_results
+python -m claims_processing.cli.fix_corrupted_results --dry-run
+python -m claims_processing.cli.fix_corrupted_results
 
-# Backup results DBs (non-blocking, safe during eval runs)
-python -m scripts.backup_dbs                       # backs up to D:\claims_backup\ by default
-python -m scripts.backup_dbs --dest E:\backup
-python -m scripts.schedule_backup --interval 3     # runs backup_dbs every 3 hours; keep terminal open
+# Backup result/benchmark DBs (non-blocking, safe during eval runs)
+python tools/backup_dbs.py                  # -> D:\claims_backup\ by default
+python tools/schedule_backup.py --interval 3
 ```
+
+`run_eval_am_benchmark.py` uses `data/benchmarks/am_benchmark.db` as input and
+defaults to `--mode local`.
 
 ## Tests
 
 ```bash
-python tests/tester.py          # full integration suite (runs test_01 through test_11)
-python tests/test_04_eval_local.py   # LLM ping + local eval
-python tests/test_05_eval_cloud.py   # parallel eval
-python tests/test_06_cuda_gpu.py     # GPU availability check
-python tests/test_07_monitoring.py   # push notification smoke test
-python tests/test_08_crash_recovery.py
-python tests/test_09_bm25_polish.py  # requires BM25_WIKI_DB
-python tests/test_10b_bm25_cache.py  # process-level cache behaviour
-python tests/test_11_am_agent_config.py  # AM agent config checks
-python tests/eval_completeness_test.py --results-db results/merged_eval.db
+python tests/tester.py                       # full integration suite
+python tests/test_04_eval_local.py           # LLM ping + local eval
+python tests/test_09_bm25_polish.py          # Polish BM25 (no network)
+python tests/test_11_am_agent_config.py      # AM agent config checks (no network)
+python tests/eval_completeness_test.py --results-db results/merged.db
 ```
 
-## Data Pipeline
+Tests import siblings directly, so run them from the `tests/` directory (or via
+`tester.py`). The Demagog DB test moved to `extras/demagog/test_demagog_db.py`.
+
+## Data pipeline
+
+See [docs/data_pipeline.md](docs/data_pipeline.md). Summary:
 
 ```bash
-# Wikipedia: scrape → chunk+embed → SQLite
-python datascrap/polish_wikipedia_webscrapper.py
-python dataprep/build_wikipedia_db.py --input polish_wikipedia_articles.jsonl
-
-# Demagog
-python datascrap/demagog_webscrapper.py && python datascrap/demagog_det_webscrapper.py
-python dataprep/demagog_db.py --input data/demagog_wypowiedzi_detailed.json
+# Wikipedia: scrape -> chunk+embed -> sqlite-vec (data/wiki/wiki.db)
+python -m claims_processing.pipeline.scrape.polish_wikipedia_webscrapper
+python -m claims_processing.pipeline.prepare.build_wikipedia_db \
+    --input data/raw/polish_wikipedia_articles.jsonl --db data/wiki/wiki.db
 
 # AM Benchmark
-python data/am_benchmark_loader.py
-python dataprep/am_benchmark_db.py --input data/am_benchmark.csv
+python -m claims_processing.pipeline.prepare.am_benchmark_loader
+python -m claims_processing.pipeline.prepare.am_benchmark_db --input data/benchmarks/am_benchmark.csv
 ```
 
 ## Architecture
 
-### Agent Infrastructure (`gen_agent/`)
+Full detail in [docs/architecture.md](docs/architecture.md). Key points:
 
-All agents inherit from `BaseAgent` (`gen_agent/base_agent.py`) and must return these keys from `eval(claim)`: `model_label`, `original_label`, `is_correct`, `total_tokens`, `prompt_tokens`, `completion_tokens`, `time_thought`, `raw_output`, `model_name`.
+- **Agent contract** (`core/base_agent.py`): `eval(claim)` returns `model_label`,
+  `original_label`, `is_correct`, `total_tokens`, `prompt_tokens`,
+  `completion_tokens`, `time_thought`, `raw_output`, `model_name`.
+- `core/llm_client.py` is a universal factory with a module-level `client`
+  singleton; agents pass `model_override` to `make_client()` for multi-model runs.
+- `core/react.py` is the universal ReAct loop (`max_steps=8` avoids most
+  `ERROR_MAX_STEPS`). The only ReAct/web agent, `single_web.py`, is **archived**
+  (see below); no active agent currently uses the web tool.
+- `core/retrieval/{bm25,rag}.py` use **process-level caches** (`_INDEX_CACHE`,
+  `_MODEL_CACHE`, `_embed_cache`) to share the 4–6 GB BM25 index and embedding
+  model across agents. Never load these twice in one process.
+- **Active roster (6 agents)**: ga1 `single` (zero-shot), ga2 `single_bm25`
+  (BM25), ga3 `rag_claim_decomp` (claim decomp + vector RAG), ga4
+  `bm25_claim_decomp` (claim decomp + BM25), ga5 `fewshot_cot_rag` (few-shot CoT
+  + RAG), ga6 `fewshot_cot_debate_rag` (debate + judge + RAG).
+- **Discontinued**: the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo)
+  was misconfigured and removed; archived as `uam_ga_web_tool_arch` in
+  `extras/discontinued/single_web.py`. The remaining agents were renumbered down
+  to ga1–ga6, and existing result rows were renamed accordingly
+  (`uam_ga3→uam_ga2`, …, `uam_ga7→uam_ga6`; old ga2 → `uam_ga_web_tool_arch`).
+- **Agent registration**: edit `_register_default_agents()` in
+  `src/claims_processing/cli/run_eval_am_benchmark.py`.
+- **AM benchmark quirk**: agents use
+  `claim.get("label_original", "") or claim.get("label", "")` for the
+  ground-truth label and call `_build_question_with_answers()` to inject answer
+  choices from `claim["metadata"]["answers"]`.
+- **Multi-model runs**: agent name becomes `uam_ga2__model-name`; globals are
+  patched during `eval()` then restored. Safe sequential; not thread-safe in
+  cloud-parallel mode.
 
-`llm_client.py` is a universal LLM factory — a module-level `client` singleton is created on import from env vars. Agents pass `model_override` to `make_client()` to create per-agent clients for multi-model evaluation runs.
+### Evaluation loop (`evaluation/eval_loop.py`)
 
-`react.py` implements a universal ReAct loop used by all `*_web.py` agents. `parse_react_output()` strips configurable thinking tags then extracts JSON (prefers ` ```json ``` ` blocks, falls back to first `{` / last `}`). The `run_react_agent()` default is `max_steps=5`; `*_web.py` agents (ga2) pass `max_steps=8` explicitly — low step counts cause most `ERROR_MAX_STEPS` failures.
+Modes: **sequential** (tests), **cloud** (`ThreadPoolExecutor(workers)`),
+**local** (tiered: tier-1 full dataset, tier-2 `--tier2-limit`, tier-3
+`--tier3-limit`). Wrapper defaults are **20000 / 20000** (effectively no cap vs
+the 18,820-row benchmark); the direct eval-loop CLI defaults to **2000 / 500**.
 
-`bm25.py` and `rag.py` use **process-level caches** (`_INDEX_CACHE`, `_MODEL_CACHE`, `_embed_cache`) to share the 4–6 GB BM25 index and embedding model across all agents. Never load these objects twice in the same process.
+**Crash recovery**: on startup `get_evaluated_claim_ids(model_name=…)` deletes
+`model_label='ERROR'` rows and returns processed IDs so they are skipped.
+`ERROR_MAX_STEPS` rows are **not** auto-deleted — use
+`claims_processing.cli.fix_corrupted_results`.
 
-### Agent Families
+## Results database — invariants (do not break)
 
-**UAM agents** (`agents_uam/`, names `uam_ga1`–`uam_ga7`):
-| Agent | File | Strategy | cost_tier |
-|-------|------|----------|-----------|
-| uam_ga1 | single.py | Zero-shot JSON | 1 |
-| uam_ga2 | single_web.py | ReAct + DuckDuckGo | 1 |
-| uam_ga3 | single_bm25.py | BM25 Wikipedia retrieval | 1 |
-| uam_ga4 | rag_claim_decomp.py | Claim decomp + vector RAG | 2 |
-| uam_ga5 | bm25_claim_decomp.py | Claim decomp + BM25 | 2 |
-| uam_ga6 | fewshot_cot_rag.py | Few-shot CoT + 3 reasoners + RAG | 2 |
-| uam_ga7 | fewshot_cot_debate_rag.py | Adversarial debate + judge + RAG | 3 |
+See [docs/results_db.md](docs/results_db.md). Location:
+`results/results_am_benchmark.db`, table `agent_results`. A UNIQUE INDEX on
+`(agent_name, claim_id, benchmark_name, model_name)` prevents duplicates.
 
-**Demagog agents** (`agents_dem/`, names `dem_ga1`–`dem_ga7`) mirror the UAM structure with Polish fact-checking prompts and text labels instead of 0–3. Shared prompts live in `agents_dem/prompts.py`.
+- **Always `INSERT OR IGNORE`** in any new write path — never plain `INSERT`.
+- **Never `DELETE FROM agent_results` unscoped** — always scope by
+  `(agent_name, benchmark_name, model_name)`.
+- **`agent_name` always carries `__<model-suffix>`** (e.g. `uam_ga6__llama3.1-8b`);
+  `register_agent()` applies it.
+- **`get_evaluated_claim_ids` takes a `model_name` arg**.
 
-**AM benchmark quirk**: Agents must use `claim.get("label_original", "") or claim.get("label", "")` for the ground-truth label, and call `_build_question_with_answers()` to inject answer choices from `claim["metadata"]["answers"]` into the question string.
+These exist because a bare `--clear` once permanently wiped Bielik results for
+two of the expensive agents before a llama re-run. Model suffixes in use:
+Bielik = `__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`,
+llama = `__llama3.1-8b`, qwen = `__qwen2.5-7b`,
+PLLuM = `__hf.co-mradermacher-Llama-PLLuM-8B-instruct-GGUF-Q4_K_M`.
 
-**Multi-model runs**: When `model_override` is passed, `__init__` creates a private `(client, model)` pair, patches module-level globals during `eval()`, then restores them. Agent name becomes `uam_ga2__model-name`. Safe in sequential mode; thread-safety is not guaranteed in cloud-parallel mode.
+### Current data state (2026-06-20, post agent-renumber)
 
-### Agent Registration
+All rows carry a `__<model-suffix>`. The agents were renumbered (old ga2 web
+agent archived as `uam_ga_web_tool_arch`; old ga3–ga7 → ga2–ga6) and the result
+rows in both `results_am_benchmark.db` and `results_am_subsample.db` were
+renamed to match. Current `agent_results` holds **uam_ga1–uam_ga6** plus the
+archived **uam_ga_web_tool_arch**, each across four models (Bielik, llama3.1:8b,
+qwen2.5:7b, PLLuM). Bielik and llama3.1 cover the full 18,820-row benchmark;
+qwen2.5 and PLLuM cover the 4,000-claim subset. Query live status with:
 
-Agents for each benchmark run are wired in `_register_default_agents()` inside `scripts/run_eval_am_benchmark.py` and `scripts/run_eval_demagog.py`. To add or remove agents from a run, edit that function. Note: `uam_ga6` (`FewShotCoTRAGAgent`) is currently **not** registered in `_register_default_agents()` for the AM benchmark run.
-
-`run_eval_am_benchmark.py` uses `data/am_benchmark.db` as its input DB (not `dataprep/am_benchmark.db` as in the generic eval_loop config) and defaults to `--mode local`.
-
-### Evaluation Loop (`eval/eval_loop.py`)
-
-Directly invokable as `python -m eval.eval_loop` (flags: `--benchmarks`, `--agents`, `--limit`, `--clear`, `--export-csv`, `--mode`, `--workers`, `--tier2-limit`, `--tier3-limit`). The wrapper scripts (`run_eval_am_benchmark.py`, `run_eval_demagog.py`) call the same `eval_benchmark*` functions and register their own agents, so for normal use prefer the wrappers — direct invocation skips the wrapper's `_register_default_agents()` so you must register agents from the calling code.
-
-Three modes wired in `run_eval_*.py` scripts:
-- **sequential** — single-threaded, used by tests
-- **cloud** — `ThreadPoolExecutor(workers)`, for Together.ai / cloud APIs
-- **local** — tiered: tier-1 on full dataset, tier-2 on `--tier2-limit`, tier-3 on `--tier3-limit`. Defaults are **20000 / 20000** in the AM/Demagog wrapper scripts (effectively "no cap" against an 18,820-row benchmark) but **2000 / 500** when invoking `eval/eval_loop.py` directly. The wrapper override is intentional — pass smaller values explicitly if you want to throttle tier 2/3.
-
-**Crash recovery**: On startup, `get_evaluated_claim_ids()` queries existing results, deletes `model_label='ERROR'` rows, and returns already-processed claim IDs so they are skipped. `ERROR_MAX_STEPS` rows are **not** auto-deleted — use `scripts/fix_corrupted_results.py` to handle them.
-
-Results DB schema is in `eval/eval_loop.py`; the `model_name` column is auto-migrated if absent.
-
-### RAG Pipeline (`gen_agent/rag.py`)
-
-Three retrieval modes: `bm25`, `vector`, `hybrid`. Hybrid uses Reciprocal Rank Fusion (RRF, k=60) to merge BM25 and vector rankings. Two-stage: fetch `k_initial=20` candidates, re-rank/filter by `score_threshold`, return `k_final=5`. Embedding model is `sdadas/mmlw-retrieval-roberta-large-v2` (768-dim), loaded once and cached in `dataprep/wikipedia_embedding.py`.
-
-### Monitoring (`monitoring/monitor.py`)
-
-`MonitoringAgent` fires brrr push notifications at scheduled times (08:00, 14:00, 19:00) and on crash/done events via background daemon threads. The eval loop calls `monitoring.update()` after each claim — never blocks. Disabled when `MONITORING_ACTIVE != "true"`.
-
-## Results Database
-
-Location: `results/results_am_benchmark.db`. Table: `agent_results`.
-
-Valid labels: `0`–`3` (UAM), `PRAWDA/CZĘŚCIOWA_PRAWDA/FAŁSZ/MANIPULACJA/NIEWERYFIKOWALNE` (Demagog). Common corruptions:
-- `ERROR_MAX_STEPS` — agent hit step limit; trajectory in `raw_output` often has a recoverable label
-- `ERROR` — exception; auto-deleted on next eval run
-- Float labels (`"1.0"`), prefix labels (`"Output: 2"`) — `_normalize_uam_label()` in `agents_uam/single_web.py` handles these going forward
-
-Use `scripts/analyze_results.py` for a full breakdown and `scripts/fix_corrupted_results.py --dry-run` before applying repairs.
-
-### Results DB invariants — do not break these
-
-A UNIQUE INDEX on `(agent_name, claim_id, benchmark_name, model_name)` prevents duplicate rows at the DB level.
-
-- **Always use `INSERT OR IGNORE`** in any new write path — never plain `INSERT`.
-- **Never use bare `DELETE FROM agent_results`** — always scope by `(agent_name, benchmark_name, model_name)`.
-- **`agent_name` always carries a `__<model-suffix>`** (e.g. `uam_ga6__llama3.1-8b`). `register_agent()` applies this automatically so Bielik and llama rows for the same agent are distinguishable by name alone, not just by `model_name` column.
-- **`get_evaluated_claim_ids` takes a `model_name` arg** — different models for the same agent accumulate as independent row sets.
-
-These rules exist because a bare `--clear` once wiped Bielik results for `uam_ga6` and `uam_ga7` before a llama re-run, losing data permanently.
-
-### Current data state (2026-04-28, post-naming-sweep)
-
-All rows in `agent_results` now carry a `__<model-suffix>` (no un-suffixed legacy rows remaining). Bielik suffix: `__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`. Llama suffix: `__llama3.1-8b`.
-
-| Agent | Bielik (Q4_K_M) | llama3.1:8b |
-|-------|-----------------|-------------|
-| uam_ga1 | complete (18,820) | complete (18,820) |
-| uam_ga2 | complete (18,820) | **registered for run** |
-| uam_ga3 | complete (18,820) | **registered for run** |
-| uam_ga4 | complete (18,820) | **registered for run** |
-| uam_ga5 | complete (18,820) | **registered for run** |
-| uam_ga6 | **needs re-run** (Bielik lost) | complete (18,820) |
-| uam_ga7 | **needs re-run** (Bielik lost) | **resume from 3,397/18,820** |
-
-`AGENT_CONFIG["name"]` was normalized from `uam_ga_7` → `uam_ga7` in `agents_uam/fewshot_cot_debate_rag.py`; the corresponding 3,397 DB rows were renamed to match.
-
-Bielik re-run for ga6/ga7 (after the llama batch completes, without `--clear`) — set `LLM_MODEL=hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M` in `.env` or change `model_override` in `_register_default_agents()`, then:
 ```bash
-python -m scripts.run_eval_am_benchmark --agents uam_ga6,uam_ga7
+python -m claims_processing.cli.analyze_results
+python tests/eval_completeness_test.py
 ```
+
+`uam_ga_web_tool_arch__*` rows are retained for reference but the agent is no
+longer registered for runs.
+
+## Archived assets (`extras/`)
+
+The Demagog benchmark (`agents_dem`, `run_eval_demagog`, `demagog_db`,
+scrapers), `local_builder/` (Ollama setup), and one-off scripts live under
+`extras/`. They depend on the installed `claims_processing` package; the demagog
+code runs with `PYTHONPATH=extras/demagog`. See [extras/README.md](extras/README.md).

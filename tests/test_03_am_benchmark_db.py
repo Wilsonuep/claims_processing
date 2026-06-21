@@ -6,7 +6,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dataprep.am_benchmark_db import init_db, ingest_am_benchmark
+from claims_processing.pipeline.prepare.am_benchmark_db import init_db, ingest_am_benchmark
 
 def test_am_benchmark_db():
     start_time = time.time()

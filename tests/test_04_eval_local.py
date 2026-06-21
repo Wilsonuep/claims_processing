@@ -3,7 +3,7 @@ Readiness check: local eval pipeline (real LLM call).
 
 Steps:
   1. LLM connectivity ping — fails fast with actionable message if backend down
-  2. Run agents_dem.single.SingleAgent (simplest BaseAgent, 1 LLM call/claim)
+  2. Run claims_processing.agents.uam.single.SingleAgent (simplest BaseAgent, 1 LLM call/claim)
      on 3 synthetic Polish claims via eval_benchmark_local (tiered mode)
   3. Verify all 3 results are stored in the DB and none are permanent ERRORs
   4. Verify MonitoringAgent state was updated during eval (done=3)
@@ -19,9 +19,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gen_agent.base_agent import BaseAgent
-from eval.eval_loop import eval_benchmark_local
-import eval.eval_loop as _el
+from claims_processing.core.base_agent import BaseAgent
+from claims_processing.evaluation.eval_loop import eval_benchmark_local
+import claims_processing.evaluation.eval_loop as _el
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ def test_eval_local() -> tuple[bool, float, str | None]:
     try:
         # ── 1. LLM connectivity ping ───────────────────────────────────────────
         try:
-            from gen_agent.llm_client import client, MODEL, LLM_BACKEND
+            from claims_processing.core.llm_client import client, MODEL, LLM_BACKEND
             ping = client.chat.completions.create(
                 model=MODEL,
                 messages=[{"role": "user", "content": "Odpowiedz jednym słowem: tak."}],
@@ -86,7 +86,7 @@ def test_eval_local() -> tuple[bool, float, str | None]:
         _make_input_db(input_db)
 
         # ── 3. Run eval (local/tiered mode) with simplest Demagog agent ───────
-        from agents_dem.single import SingleAgent
+        from claims_processing.agents.uam.single import SingleAgent
 
         agent = SingleAgent()
         eval_benchmark_local(

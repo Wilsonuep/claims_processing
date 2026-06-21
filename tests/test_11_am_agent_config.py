@@ -129,10 +129,10 @@ def test_am_agent_config() -> tuple[bool, float, str | None]:
     start = time.time()
 
     agents_to_test = [
-        ("agents_uam.bm25_claim_decomp", "ask", "ClaimDecompBM25Agent"),
-        ("agents_uam.rag_claim_decomp",  "ask", "ClaimDecompRAGAgent"),
-        ("agents_uam.fewshot_cot_rag",   "ask", "FewShotCoTAgent"),
-        ("agents_uam.fewshot_cot_debate_rag", "debate_ask", "DebateCoTAgent"),
+        ("claims_processing.agents.uam.bm25_claim_decomp", "ask", "ClaimDecompBM25Agent"),
+        ("claims_processing.agents.uam.rag_claim_decomp",  "ask", "ClaimDecompRAGAgent"),
+        ("claims_processing.agents.uam.fewshot_cot_rag",   "ask", "FewShotCoTAgent"),
+        ("claims_processing.agents.uam.fewshot_cot_debate_rag", "debate_ask", "DebateCoTAgent"),
     ]
 
     for module, ask_fn, class_name in agents_to_test:

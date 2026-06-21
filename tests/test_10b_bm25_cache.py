@@ -15,7 +15,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gen_agent.bm25 import BM25Index
+from claims_processing.core.retrieval.bm25 import BM25Index
 
 
 def _make_test_db(path: str, n_rows: int = 20) -> None:

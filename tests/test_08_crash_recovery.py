@@ -21,8 +21,8 @@ import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gen_agent.base_agent import BaseAgent
-from eval.eval_loop import (
+from claims_processing.core.base_agent import BaseAgent
+from claims_processing.evaluation.eval_loop import (
     eval_benchmark,
     eval_benchmark_cloud,
     init_results_db,

@@ -18,10 +18,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dataprep.wikipeda_chunking import build_article_chunks
-from dataprep.wikipedia_db import init_db, insert_chunk_batch, knn_search
-from dataprep.wikipedia_embedding import load_model
-from monitoring.monitor import MonitoringAgent
+from claims_processing.pipeline.prepare.wikipeda_chunking import build_article_chunks
+from claims_processing.pipeline.prepare.wikipedia_db import init_db, insert_chunk_batch, knn_search
+from claims_processing.pipeline.prepare.wikipedia_embedding import load_model
+from claims_processing.monitoring.monitor import MonitoringAgent
 
 
 # ---------------------------------------------------------------------------

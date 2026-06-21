@@ -6,7 +6,7 @@ with workers=2 to verify parallel claim processing works end-to-end.
 
 Steps:
   1. LLM connectivity ping
-  2. Run agents_dem.single.SingleAgent on 3 claims via eval_benchmark_cloud
+  2. Run claims_processing.agents.uam.single.SingleAgent on 3 claims via eval_benchmark_cloud
   3. Verify all 3 results stored, not all ERROR
   4. Verify ordering/deduplication: re-running skips already-done claims
 
@@ -21,7 +21,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from eval.eval_loop import eval_benchmark_cloud, get_evaluated_claim_ids, init_results_db
+from claims_processing.evaluation.eval_loop import eval_benchmark_cloud, get_evaluated_claim_ids, init_results_db
 
 
 _CLAIMS = [
@@ -59,7 +59,7 @@ def test_eval_cloud() -> tuple[bool, float, str | None]:
     try:
         # ── 1. LLM connectivity ping ───────────────────────────────────────────
         try:
-            from gen_agent.llm_client import client, MODEL, LLM_BACKEND
+            from claims_processing.core.llm_client import client, MODEL, LLM_BACKEND
             ping = client.chat.completions.create(
                 model=MODEL,
                 messages=[{"role": "user", "content": "Odpowiedz jednym słowem: tak."}],
@@ -81,7 +81,7 @@ def test_eval_cloud() -> tuple[bool, float, str | None]:
         # ── 2. Build input DB ─────────────────────────────────────────────────
         _make_input_db(input_db)
 
-        from agents_dem.single import SingleAgent
+        from claims_processing.agents.uam.single import SingleAgent
         agent = SingleAgent()
 
         # ── 3. First run: parallel eval ───────────────────────────────────────
