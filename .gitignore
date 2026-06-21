@@ -17,6 +17,8 @@ data/wiki/
 *.jsonl
 *.db
 wiki.db-journal
+# stray benchmark CSV that landed in the src tree
+src/claims_processing/pipeline/prepare/am_benchmark.csv
 
 # --- Results ---
 results/
