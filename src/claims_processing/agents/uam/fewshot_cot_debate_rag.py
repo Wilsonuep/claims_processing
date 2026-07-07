@@ -539,8 +539,11 @@ def judge_debate(
 AGENT_CONFIG = {
     "name": "uam_ga6",
     "model": "openai/gpt-oss-20b",
-    "system_prompt": "Debate CoT: Decomposer → RAG → Proponent vs Opponent → Judge",
-    "tools": ["rag_two_stage", "claim_decomposition", "adversarial_debate"],
+    # NOTE: retrieval runs through RAGRetriever in `_RAG_MODE` (default "bm25").
+    # RAG_MODE was never set to vector/hybrid for the benchmark runs, so every
+    # ga6 result used lexical BM25 retrieval, not vector/hybrid.
+    "system_prompt": "Debate CoT: Decomposer → BM25 (RAG_MODE default) → Proponent vs Opponent → Judge",
+    "tools": ["bm25_two_stage", "claim_decomposition", "adversarial_debate"],
 }
 
 

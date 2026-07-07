@@ -858,8 +858,11 @@ def _get_nli_verifier() -> NLIVerifier:
 AGENT_CONFIG = {
     "name": "uam_ga5",
     "model": MODEL,
-    "system_prompt": "Few-Shot CoT: Decomposer → RAG (two-stage) → 3×Reasoner → Consolidator",
-    "tools": ["rag_two_stage", "claim_decomposition", "cot_multi_voter"],
+    # NOTE: two-stage retrieval runs through RAGRetriever in `_RAG_MODE`, which
+    # defaults to "bm25". RAG_MODE was never set to vector/hybrid for the
+    # benchmark runs, so every ga5 result used lexical BM25 retrieval.
+    "system_prompt": "Few-Shot CoT: Decomposer → BM25 two-stage (RAG_MODE default) → 3×Reasoner → Consolidator",
+    "tools": ["bm25_two_stage", "claim_decomposition", "cot_multi_voter"],
 }
 
 

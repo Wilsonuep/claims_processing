@@ -50,10 +50,17 @@ same process.
 |---------|----------------------------|---------------------------------------|-----------|
 | uam_ga1 | single.py                  | Zero-shot JSON                        | 1 |
 | uam_ga2 | single_bm25.py             | BM25 Wikipedia retrieval              | 1 |
-| uam_ga3 | rag_claim_decomp.py        | Claim decomp + vector RAG             | 2 |
+| uam_ga3 | rag_claim_decomp.py        | Claim decomp + BM25 retrieval¹        | 2 |
 | uam_ga4 | bm25_claim_decomp.py       | Claim decomp + BM25                   | 2 |
-| uam_ga5 | fewshot_cot_rag.py         | Few-shot CoT + 3 reasoners + RAG      | 3 |
-| uam_ga6 | fewshot_cot_debate_rag.py  | Adversarial debate + judge + RAG      | 3 |
+| uam_ga5 | fewshot_cot_rag.py         | Few-shot CoT + 3 reasoners + BM25¹    | 3 |
+| uam_ga6 | fewshot_cot_debate_rag.py  | Adversarial debate + judge + BM25¹    | 3 |
+
+> ¹ **Retrieval backend.** ga3/ga5/ga6 retrieve through `RAGRetriever`, whose
+> `RAG_MODE` supports `bm25` \| `vector` \| `hybrid` but **defaults to `bm25`**.
+> `RAG_MODE` was never set to `vector`/`hybrid` for the benchmark runs, so every
+> stored result for these agents used **lexical BM25**, not vector/hybrid. ga3 is
+> therefore a decomposition + BM25 pipeline like ga4, differing only in code path
+> (`RAGRetriever` in bm25 mode vs. `BM25Index` directly).
 
 > **Discontinued:** the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo
 > web tool) was misconfigured and removed from the benchmark. It is archived as
@@ -110,6 +117,12 @@ Fusion (RRF, k=60) to merge BM25 and vector rankings. Two-stage: fetch
 `k_initial=20` candidates, re-rank/filter by `score_threshold`, return
 `k_final=5`. Embedding model is `sdadas/mmlw-retrieval-roberta-large-v2`
 (768-dim), loaded once and cached in `pipeline/prepare/wikipedia_embedding.py`.
+
+> **Which mode actually ran:** agents select the mode via the `RAG_MODE` env var,
+> which **defaults to `bm25`**. `RAG_MODE` was never exported for the benchmark
+> runs, so `vector`/`hybrid` (and the embedding model above) were **never
+> exercised** — all stored results used BM25. The vector/hybrid paths remain
+> available but untested against the benchmark.
 
 ## Monitoring (`monitoring/monitor.py`)
 
