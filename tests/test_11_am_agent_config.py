@@ -128,9 +128,10 @@ def _test_agent(agent_module: str, ask_fn: str, agent_class_name: str) -> tuple[
 def test_am_agent_config() -> tuple[bool, float, str | None]:
     start = time.time()
 
+    # rag_claim_decomp (ClaimDecompRAGAgent) was archived to extras/discontinued/
+    # as uam_ga_rag_decomp_arch — no longer part of the package.
     agents_to_test = [
         ("claims_processing.agents.uam.bm25_claim_decomp", "ask", "ClaimDecompBM25Agent"),
-        ("claims_processing.agents.uam.rag_claim_decomp",  "ask", "ClaimDecompRAGAgent"),
         ("claims_processing.agents.uam.fewshot_cot_rag",   "ask", "FewShotCoTAgent"),
         ("claims_processing.agents.uam.fewshot_cot_debate_rag", "debate_ask", "DebateCoTAgent"),
     ]

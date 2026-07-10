@@ -38,14 +38,26 @@ for local (Ollama) inference setup.
 
 ## discontinued/ — retired agents
 
+Both retired agents were removed from the active AM benchmark and the remaining
+agents renumbered down after each archival; their result rows were **renamed,
+not deleted**, in the results DBs. Kept for reference only — they still import
+`claims_processing.core.*` but are no longer registered for runs.
+
 `single_web.py` — the former **uam_ga2** agent (zero-shot + ReAct + DuckDuckGo
-web tool), renamed **`uam_ga_web_tool_arch`**. It was misconfigured and removed
-from the active AM benchmark; the remaining agents were renumbered down to
-uam_ga1–uam_ga6. Its existing result rows were renamed to
-`uam_ga_web_tool_arch__*` in the results DBs (preserved, not deleted). Kept for
-reference only — it still imports `claims_processing.core.*` but is no longer
-registered for runs.
+web tool), renamed **`uam_ga_web_tool_arch`**. It was misconfigured; after its
+removal old ga3–ga7 were renumbered to ga2–ga6 and its result rows renamed to
+`uam_ga_web_tool_arch__*`.
+
+`rag_claim_decomp.py` — the former **uam_ga3** agent (claim decomposition
+through `RAGRetriever`), renamed **`uam_ga_rag_decomp_arch`**. `RAG_MODE` was
+never set to `vector`/`hybrid`, so every stored result used lexical BM25 —
+making it functionally redundant with `bm25_claim_decomp.py` (identical
+prompts; only the retrieval code path differed). After its removal old ga4–ga6
+were renumbered to ga3–ga5 and its result rows renamed to
+`uam_ga_rag_decomp_arch__*` (migration: `oneoff/archive_ga3_renumber.py`).
 
 ## oneoff/ — one-off utilities
 
-`test_api.py` (quick LLM API ping) and `json_file_check.py` (JSON validation).
+`test_api.py` (quick LLM API ping), `json_file_check.py` (JSON validation) and
+`archive_ga3_renumber.py` (the 2026-07 results-DB migration that archived
+uam_ga3 and renumbered ga4–ga6 → ga3–ga5).

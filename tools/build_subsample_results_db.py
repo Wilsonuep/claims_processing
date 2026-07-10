@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Build a combined 4k-subset results DB for fair 1:1 cross-model comparison.
 
-Four models were evaluated on the AM benchmark (agents ga1-ga7):
+Four models were evaluated on the AM benchmark (active agents ga1-ga5):
 
     Bielik-11B          full 18,820 claims
     llama3.1:8b         full 18,820 claims
@@ -34,14 +34,14 @@ SUBSET_DB = paths.AM_BENCHMARK_4K_DB
 OUTPUT_DB = paths.RESULTS_AM_SUBSAMPLE_DB
 
 BENCHMARK_NAME = "am_benchmark"
-BASE_AGENTS = [f"uam_ga{i}" for i in range(1, 7)]
+BASE_AGENTS = [f"uam_ga{i}" for i in range(1, 6)]
 
 # model_name -> short label (mirrors _short_model() used in the notebooks)
 MODELS = {
-    "hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M": "Bielik-11B",
+    "hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M": "Bielik-11B-v2.3:Q4_K_M",
     "llama3.1:8b": "llama3.1:8b",
     "qwen2.5:7b": "qwen2.5:7b",
-    "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M": "PLLuM-8B",
+    "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M": "Llama-PLLuM-8B:Q4_K_M",
 }
 
 # Canonical schema, copied verbatim from eval/eval_loop.py (incl. model_name).

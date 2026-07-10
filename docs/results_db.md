@@ -33,7 +33,7 @@ duplicate rows at the DB level.
 - **Never use bare `DELETE FROM agent_results`** — always scope by
   `(agent_name, benchmark_name, model_name)`.
 - **`agent_name` always carries a `__<model-suffix>`** (e.g.
-  `uam_ga6__llama3.1-8b`). `register_agent()` applies this automatically so
+  `uam_ga5__llama3.1-8b`). `register_agent()` applies this automatically so
   Bielik and llama rows for the same agent are distinguishable by name alone,
   not just by the `model_name` column.
 - **`get_evaluated_claim_ids` takes a `model_name` arg** — different models for

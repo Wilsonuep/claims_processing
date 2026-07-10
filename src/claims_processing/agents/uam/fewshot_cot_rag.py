@@ -856,11 +856,12 @@ def _get_nli_verifier() -> NLIVerifier:
 # ═══════════════════════════════════════════════════════════════════════════
 
 AGENT_CONFIG = {
-    "name": "uam_ga5",
+    "name": "uam_ga4",
     "model": MODEL,
     # NOTE: two-stage retrieval runs through RAGRetriever in `_RAG_MODE`, which
     # defaults to "bm25". RAG_MODE was never set to vector/hybrid for the
-    # benchmark runs, so every ga5 result used lexical BM25 retrieval.
+    # benchmark runs, so every result of this agent (ga5 before the 2026-07
+    # renumber, ga4 now) used lexical BM25 retrieval.
     "system_prompt": "Few-Shot CoT: Decomposer → BM25 two-stage (RAG_MODE default) → 3×Reasoner → Consolidator",
     "tools": ["bm25_two_stage", "claim_decomposition", "cot_multi_voter"],
 }
