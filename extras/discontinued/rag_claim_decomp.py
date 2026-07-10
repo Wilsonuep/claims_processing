@@ -2,6 +2,15 @@
 System agentowy: RAG + dekompozycja twierdzeń (Claim Decomposition)
 ====================================================================
 
+DISCONTINUED — formerly **uam_ga3**, renamed **uam_ga_rag_decomp_arch**
+(2026-07-10). RAG_MODE was never set to vector/hybrid, so every stored result
+used lexical BM25 — making this agent functionally redundant with
+bm25_claim_decomp (identical prompts, only the retrieval code path differs).
+Removed from the active benchmark; the remaining agents were renumbered down
+to uam_ga1–uam_ga5 and its result rows renamed to `uam_ga_rag_decomp_arch__*`
+(preserved, not deleted). Kept for reference only — it still imports
+claims_processing.core.* but is no longer registered for runs.
+
 Wieloetapowy pipeline agentowy składający się z 3 agentów:
 
     Agent 1 — DECOMPOSER
@@ -28,16 +37,12 @@ Kompatybilność z eval_loop.py
     i implementuje ``eval(claim)`` — gotowa do rejestracji
     w pętli ewaluacyjnej.
 
-Użycie
-------
-    from claims_processing.agents.uam.rag_claim_decomp import ClaimDecompRAGAgent
-
+Użycie (archiwalne — moduł nie jest już częścią pakietu)
+---------------------------------------------------------
+    # uruchamiaj z korzenia repo, np.:
+    #   python extras/discontinued/rag_claim_decomp.py
     agent = ClaimDecompRAGAgent()
     result = agent.eval(claim_dict)
-
-    # Lub z eval_loop:
-    from claims_processing.evaluation.eval_loop import register_agent
-    register_agent(ClaimDecompRAGAgent())
 
 Wymaga
 ------
@@ -389,10 +394,11 @@ def verify_claim(
 
 # NOTE: retrieval runs through RAGRetriever in `_RAG_MODE`, which defaults to
 # "bm25" (see above). Vector/hybrid only engage when RAG_MODE=vector|hybrid is
-# exported — which it was NOT during the benchmark runs. Every stored ga3 result
-# therefore used lexical BM25 retrieval, not vector/hybrid.
+# exported — which it was NOT during the benchmark runs. Every stored result
+# therefore used lexical BM25 retrieval, not vector/hybrid. This is why the
+# agent (formerly uam_ga3) was archived.
 AGENT_CONFIG = {
-    "name": "uam_ga3",
+    "name": "uam_ga_rag_decomp_arch",
     "model": model,
     "system_prompt": "Multi-agent: Decomposer → BM25 Retriever (RAG_MODE default) → Verifier",
     "tools": ["bm25_wikipedia", "claim_decomposition"],
@@ -465,19 +471,13 @@ def ask(question: str) -> dict:
 class ClaimDecompRAGAgent(BaseAgent):
     """Agent wieloetapowy z dekompozycją twierdzeń i RAG retrieval.
 
-    Kompatybilny z ``eval_loop.py`` — implementuje ``BaseAgent.eval()``.
+    DISCONTINUED — formerly uam_ga3; archived as uam_ga_rag_decomp_arch and
+    no longer registered for runs (see module docstring).
 
     Pipeline:
         1. Decomposer (LLM) → pod-twierdzenia
         2. Retriever (RAG)  → kontekst per pod-twierdzenie
         3. Verifier  (LLM)  → finalna odpowiedź
-
-    Użycie
-    ------
-        from claims_processing.evaluation.eval_loop import register_agent
-        from claims_processing.agents.uam.rag_claim_decomp import ClaimDecompRAGAgent
-
-        register_agent(ClaimDecompRAGAgent())
     """
 
     name = AGENT_CONFIG["name"]
@@ -497,7 +497,8 @@ class ClaimDecompRAGAgent(BaseAgent):
 
     def eval(self, claim: dict[str, Any]) -> dict[str, Any]:
         if self._override_client is not None:
-            import claims_processing.agents.uam.rag_claim_decomp as _m
+            import sys
+            _m = sys.modules[__name__]  # module lives outside the package now
             _orig_client, _orig_model = _m.client, _m.model
             _m.client = self._override_client
             _m.model = self._override_model

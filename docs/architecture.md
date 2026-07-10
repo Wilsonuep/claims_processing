@@ -13,7 +13,7 @@ src/claims_processing/
 │   └── retrieval/
 │       ├── bm25.py     # BM25 index (process-level _INDEX_CACHE)
 │       └── rag.py      # RAG retriever: bm25 | vector | hybrid (RRF)
-├── agents/uam/         # the 6 active AM/UAM agents (ga1–ga6)
+├── agents/uam/         # the 5 active AM/UAM agents (ga1–ga5)
 ├── pipeline/
 │   ├── scrape/         # polish_wikipedia_webscrapper.py
 │   └── prepare/        # *_db builders, chunking, embedding, am_benchmark_loader
@@ -50,24 +50,31 @@ same process.
 |---------|----------------------------|---------------------------------------|-----------|
 | uam_ga1 | single.py                  | Zero-shot JSON                        | 1 |
 | uam_ga2 | single_bm25.py             | BM25 Wikipedia retrieval              | 1 |
-| uam_ga3 | rag_claim_decomp.py        | Claim decomp + BM25 retrieval¹        | 2 |
-| uam_ga4 | bm25_claim_decomp.py       | Claim decomp + BM25                   | 2 |
-| uam_ga5 | fewshot_cot_rag.py         | Few-shot CoT + 3 reasoners + BM25¹    | 3 |
-| uam_ga6 | fewshot_cot_debate_rag.py  | Adversarial debate + judge + BM25¹    | 3 |
+| uam_ga3 | bm25_claim_decomp.py       | Claim decomp + BM25                   | 2 |
+| uam_ga4 | fewshot_cot_rag.py         | Few-shot CoT + 3 reasoners + BM25¹    | 3 |
+| uam_ga5 | fewshot_cot_debate_rag.py  | Adversarial debate + judge + BM25¹    | 3 |
 
-> ¹ **Retrieval backend.** ga3/ga5/ga6 retrieve through `RAGRetriever`, whose
+> ¹ **Retrieval backend.** ga4/ga5 retrieve through `RAGRetriever`, whose
 > `RAG_MODE` supports `bm25` \| `vector` \| `hybrid` but **defaults to `bm25`**.
 > `RAG_MODE` was never set to `vector`/`hybrid` for the benchmark runs, so every
-> stored result for these agents used **lexical BM25**, not vector/hybrid. ga3 is
-> therefore a decomposition + BM25 pipeline like ga4, differing only in code path
-> (`RAGRetriever` in bm25 mode vs. `BM25Index` directly).
+> stored result for these agents used **lexical BM25**, not vector/hybrid.
 
-> **Discontinued:** the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo
-> web tool) was misconfigured and removed from the benchmark. It is archived as
-> **`uam_ga_web_tool_arch`** in [`extras/discontinued/single_web.py`](../extras/discontinued/single_web.py);
-> its existing result rows were renamed to `uam_ga_web_tool_arch__*` rather than
-> deleted. The remaining agents were renumbered down to ga1–ga6 (the table above
-> reflects the current numbering).
+> **Discontinued (two archivals, agents renumbered down after each):**
+> 1. The former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo web tool) was
+>    misconfigured and removed from the benchmark. Archived as
+>    **`uam_ga_web_tool_arch`** in [`extras/discontinued/single_web.py`](../extras/discontinued/single_web.py);
+>    result rows renamed to `uam_ga_web_tool_arch__*` rather than deleted
+>    (old ga3–ga7 → ga2–ga6).
+> 2. The former **uam_ga3** (`rag_claim_decomp.py`, claim decomp through
+>    `RAGRetriever`) never used vector retrieval (see ¹) and was therefore
+>    functionally redundant with `bm25_claim_decomp.py` — identical prompts,
+>    only the retrieval code path differed. Archived as
+>    **`uam_ga_rag_decomp_arch`** in [`extras/discontinued/rag_claim_decomp.py`](../extras/discontinued/rag_claim_decomp.py);
+>    result rows renamed to `uam_ga_rag_decomp_arch__*` rather than deleted
+>    (old ga4–ga6 → ga3–ga5; migration script:
+>    [`extras/oneoff/archive_ga3_renumber.py`](../extras/oneoff/archive_ga3_renumber.py)).
+>
+> The table above reflects the current numbering (ga1–ga5).
 
 **AM benchmark quirk**: agents use `claim.get("label_original", "") or
 claim.get("label", "")` for the ground-truth label, and call

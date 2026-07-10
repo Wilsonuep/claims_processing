@@ -19,7 +19,7 @@ Imports are `claims_processing.<layer>.<module>`.
 src/claims_processing/
 ├── paths.py            # SINGLE SOURCE OF TRUTH for data/results/wiki paths
 ├── core/               # base_agent, llm_client, react  (+ retrieval/{bm25,rag})
-├── agents/uam/         # uam_ga1–uam_ga6
+├── agents/uam/         # uam_ga1–uam_ga5
 ├── pipeline/{scrape,prepare}/   # scrapers + DB builders/chunking/embedding
 ├── evaluation/         # eval_loop.py
 ├── monitoring/         # monitor.py
@@ -130,22 +130,26 @@ Full detail in [docs/architecture.md](docs/architecture.md). Key points:
 - `core/retrieval/{bm25,rag}.py` use **process-level caches** (`_INDEX_CACHE`,
   `_MODEL_CACHE`, `_embed_cache`) to share the 4–6 GB BM25 index and embedding
   model across agents. Never load these twice in one process.
-- **Active roster (6 agents)**: ga1 `single` (zero-shot), ga2 `single_bm25`
-  (BM25), ga3 `rag_claim_decomp` (claim decomp + BM25), ga4
-  `bm25_claim_decomp` (claim decomp + BM25), ga5 `fewshot_cot_rag` (few-shot CoT
-  + BM25), ga6 `fewshot_cot_debate_rag` (debate + judge + BM25).
-- **Retrieval backend (important):** ga3/ga5/ga6 retrieve through `RAGRetriever`,
+- **Active roster (5 agents)**: ga1 `single` (zero-shot), ga2 `single_bm25`
+  (BM25), ga3 `bm25_claim_decomp` (claim decomp + BM25), ga4 `fewshot_cot_rag`
+  (few-shot CoT + BM25), ga5 `fewshot_cot_debate_rag` (debate + judge + BM25).
+- **Retrieval backend (important):** ga4/ga5 retrieve through `RAGRetriever`,
   which reads `RAG_MODE` (`bm25`|`vector`|`hybrid`, **default `bm25`**). `RAG_MODE`
   was **never set to `vector`/`hybrid`**, so every stored result for these agents
-  used **lexical BM25** — no run ever used vector/embedding retrieval. ga3 is thus
-  a decomposition+BM25 pipeline like ga4 (they differ only in code path:
-  `RAGRetriever` in bm25 mode vs. `BM25Index` directly). Notebook labels and agent
-  `AGENT_CONFIG`s were corrected to reflect this; don't reintroduce "vector RAG".
-- **Discontinued**: the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo)
-  was misconfigured and removed; archived as `uam_ga_web_tool_arch` in
-  `extras/discontinued/single_web.py`. The remaining agents were renumbered down
-  to ga1–ga6, and existing result rows were renamed accordingly
-  (`uam_ga3→uam_ga2`, …, `uam_ga7→uam_ga6`; old ga2 → `uam_ga_web_tool_arch`).
+  used **lexical BM25** — no run ever used vector/embedding retrieval. Notebook
+  labels and agent `AGENT_CONFIG`s were corrected to reflect this; don't
+  reintroduce "vector RAG".
+- **Discontinued (two archivals, renumber after each)**:
+  1. The former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo) was
+     misconfigured and removed; archived as `uam_ga_web_tool_arch` in
+     `extras/discontinued/single_web.py` (old ga3–ga7 → ga2–ga6).
+  2. The former **uam_ga3** (`rag_claim_decomp.py`, decomp via `RAGRetriever`)
+     never used vector retrieval and was redundant with `bm25_claim_decomp`
+     (identical prompts, different retrieval code path only); archived as
+     `uam_ga_rag_decomp_arch` in `extras/discontinued/rag_claim_decomp.py`
+     (old ga4–ga6 → ga3–ga5; migration:
+     `extras/oneoff/archive_ga3_renumber.py`).
+  In both cases existing result rows were renamed, not deleted.
 - **Agent registration**: edit `_register_default_agents()` in
   `src/claims_processing/cli/run_eval_am_benchmark.py`.
 - **AM benchmark quirk**: agents use
@@ -177,7 +181,7 @@ See [docs/results_db.md](docs/results_db.md). Location:
 - **Always `INSERT OR IGNORE`** in any new write path — never plain `INSERT`.
 - **Never `DELETE FROM agent_results` unscoped** — always scope by
   `(agent_name, benchmark_name, model_name)`.
-- **`agent_name` always carries `__<model-suffix>`** (e.g. `uam_ga6__llama3.1-8b`);
+- **`agent_name` always carries `__<model-suffix>`** (e.g. `uam_ga5__llama3.1-8b`);
   `register_agent()` applies it.
 - **`get_evaluated_claim_ids` takes a `model_name` arg**.
 
@@ -187,13 +191,17 @@ Bielik = `__hf.co-speakleash-Bielik-11B-v2.3-Instruct-GGUF-Q4_K_M`,
 llama = `__llama3.1-8b`, qwen = `__qwen2.5-7b`,
 PLLuM = `__hf.co-mradermacher-Llama-PLLuM-8B-instruct-GGUF-Q4_K_M`.
 
-### Current data state (2026-06-20, post agent-renumber)
+### Current data state (2026-07-10, post ga3-archival)
 
-All rows carry a `__<model-suffix>`. The agents were renumbered (old ga2 web
-agent archived as `uam_ga_web_tool_arch`; old ga3–ga7 → ga2–ga6) and the result
-rows in both `results_am_benchmark.db` and `results_am_subsample.db` were
-renamed to match. Current `agent_results` holds **uam_ga1–uam_ga6** plus the
-archived **uam_ga_web_tool_arch**, each across four models (Bielik, llama3.1:8b,
+All rows carry a `__<model-suffix>`. Two archival renumbers have been applied
+to the result rows in both `results_am_benchmark.db` and
+`results_am_subsample.db`: first the old ga2 web agent (→
+`uam_ga_web_tool_arch`, old ga3–ga7 → ga2–ga6), then the old ga3 rag-decomp
+agent (→ `uam_ga_rag_decomp_arch`, old ga4–ga6 → ga3–ga5; script:
+`extras/oneoff/archive_ga3_renumber.py`, backup in
+`results/_backup_pre_ga3_archive_*/`). Current `agent_results` holds
+**uam_ga1–uam_ga5** plus the archived **uam_ga_web_tool_arch** and
+**uam_ga_rag_decomp_arch**, each across four models (Bielik, llama3.1:8b,
 qwen2.5:7b, PLLuM). Bielik and llama3.1 cover the full 18,820-row benchmark;
 qwen2.5 and PLLuM cover the 4,000-claim subset. Query live status with:
 
@@ -202,8 +210,10 @@ python -m claims_processing.cli.analyze_results
 python tests/eval_completeness_test.py
 ```
 
-`uam_ga_web_tool_arch__*` rows are retained for reference but the agent is no
-longer registered for runs.
+Archived-agent rows (`uam_ga_web_tool_arch__*`, `uam_ga_rag_decomp_arch__*`)
+are retained for reference but those agents are no longer registered for runs.
+Summary tables: `docs/results_summary.md` (regenerate with
+`python tools/generate_results_summary.py`).
 
 ## Archived assets (`extras/`)
 

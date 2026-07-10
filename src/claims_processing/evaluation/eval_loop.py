@@ -24,7 +24,7 @@ Użycie
     python -m claims_processing.evaluation.eval_loop --mode local --tier2-limit 2000 --tier3-limit 500
 
     # Wybrane agenty + benchmark + limit
-    python -m claims_processing.evaluation.eval_loop --agents uam_ga1,uam_ga6 --benchmarks demagog --limit 100
+    python -m claims_processing.evaluation.eval_loop --agents uam_ga1,uam_ga5 --benchmarks demagog --limit 100
 
     # Wyczyść poprzednie wyniki
     python -m claims_processing.evaluation.eval_loop --clear
@@ -98,8 +98,10 @@ RESULTS_DIR = str(paths.RESULTS_DIR)
 # NOTE: this is only a legacy fallback for agents that do not declare an explicit
 # ``cost_tier`` class attribute (see ``_get_agent_tier``). All current UAM agents
 # declare ``cost_tier``. UAM numbering below reflects the post-discontinuation
-# scheme (old ga2 web agent archived as ``uam_ga_web_tool_arch``; old ga3–ga7 →
-# ga2–ga6). The ``dem_ga*`` names are unchanged (Demagog was not renumbered).
+# scheme: old ga2 web agent archived as ``uam_ga_web_tool_arch`` (old ga3–ga7 →
+# ga2–ga6), then old ga3 rag_claim_decomp archived as ``uam_ga_rag_decomp_arch``
+# (old ga4–ga6 → ga3–ga5). The ``dem_ga*`` names are unchanged (Demagog was not
+# renumbered).
 
 # Agents with ≤1 LLM calls per claim — run on full dataset
 TIER1_AGENTS: frozenset[str] = frozenset({
@@ -111,14 +113,14 @@ TIER1_AGENTS: frozenset[str] = frozenset({
 
 # Agents with 2 LLM calls per claim — moderate cost
 TIER2_AGENTS: frozenset[str] = frozenset({
-    "uam_ga3", "dem_ga4",  # rag_claim_decomp (2 calls)
-    "uam_ga4", "dem_ga5",  # bm25_claim_decomp (2 calls)
+    "uam_ga_rag_decomp_arch", "dem_ga4",   # rag_claim_decomp — discontinued for UAM (2 calls)
+    "uam_ga3", "dem_ga5",                  # bm25_claim_decomp (2 calls)
 })
 
 # Agents with 4+ LLM calls per claim — expensive
 TIER3_AGENTS: frozenset[str] = frozenset({
-    "uam_ga5", "dem_ga6",                       # fewshot_cot_rag (4-5 calls)
-    "uam_ga6", "uam_ga_debate", "dem_ga7",      # debate pipeline (7-8 calls)
+    "uam_ga4", "dem_ga6",                       # fewshot_cot_rag (4-5 calls)
+    "uam_ga5", "uam_ga_debate", "dem_ga7",      # debate pipeline (7-8 calls)
 })
 
 # Default limits for local mode
@@ -168,7 +170,7 @@ def register_agent(agent: BaseAgent) -> None:
     if not hasattr(agent, "name") or not agent.name:
         raise ValueError("Agent musi mieć ustawiony atrybut 'name'.")
     # Always encode the model in agent_name so rows are identifiable without
-    # consulting the model_name column (e.g. uam_ga6__llama3.1-8b).
+    # consulting the model_name column (e.g. uam_ga5__llama3.1-8b).
     if agent.model_name and "__" not in agent.name:
         suffix = agent.model_name.replace("/", "-").replace(":", "-")
         agent.name = f"{agent.name}__{suffix}"

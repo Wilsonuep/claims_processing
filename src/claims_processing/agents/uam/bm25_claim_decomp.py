@@ -2,8 +2,11 @@
 System agentowy: BM25 + dekompozycja twierdzeń (Claim Decomposition)
 =====================================================================
 
-Uproszczona wersja ``rag_claim_decomp.py`` wykorzystująca bezpośrednio
-BM25 zamiast pełnego RAG (bez embeddingów, bez sqlite-vec).
+Pipeline dekompozycji z bezpośrednim BM25 (bez embeddingów, bez sqlite-vec).
+Uproszczona wersja zarchiwizowanego ``extras/discontinued/rag_claim_decomp.py``
+(dawny uam_ga3, obecnie ``uam_ga_rag_decomp_arch``) — tamten wariant nigdy nie
+używał retrievalu wektorowego (RAG_MODE zawsze "bm25"), więc ten agent go
+zastąpił.
 
 Pipeline:
     Agent 1 — DECOMPOSER  → rozbija twierdzenie na pod-twierdzenia
@@ -294,7 +297,7 @@ def verify_claim(
 # ---------------------------------------------------------------------------
 
 AGENT_CONFIG = {
-    "name": "uam_ga4",
+    "name": "uam_ga3",
     "model": model,
     "system_prompt": "Multi-agent: Decomposer → BM25 Retriever → Verifier",
     "tools": ["bm25_wikipedia", "claim_decomposition"],
@@ -359,8 +362,8 @@ def ask(question: str) -> dict:
 class ClaimDecompBM25Agent(BaseAgent):
     """Agent wieloetapowy: dekompozycja + BM25 retrieval.
 
-    Uproszczona wersja ``ClaimDecompRAGAgent`` — bez embeddingów,
-    bez sqlite-vec. Wymaga jedynie bazy SQLite z tabelą ``wiki_chunks``.
+    Bez embeddingów, bez sqlite-vec — wymaga jedynie bazy SQLite z tabelą
+    ``wiki_chunks``. (Zastąpił zarchiwizowanego ``ClaimDecompRAGAgent``.)
     """
 
     name = AGENT_CONFIG["name"]
