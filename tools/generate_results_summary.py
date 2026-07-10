@@ -24,8 +24,8 @@ OUTPUT = paths.PROJECT_ROOT / "docs" / "results_summary.md"
 
 # Shortened Ollama-tag labels (mirrors _short_model() in the notebooks).
 MODEL_LABELS = {
-    "hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M": "Bielik-11B-v2.3:Q4_K_M",
-    "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M": "Llama-PLLuM-8B:Q4_K_M",
+    "hf.co/speakleash/Bielik-11B-v2.3-Instruct-GGUF:Q4_K_M": "Bielik-11B-v2.3",
+    "hf.co/mradermacher/Llama-PLLuM-8B-instruct-GGUF:Q4_K_M": "Llama-PLLuM-8B",
     "llama3.1:8b": "llama3.1:8b",
     "qwen2.5:7b": "qwen2.5:7b",
 }
