@@ -387,11 +387,15 @@ def verify_claim(
 # AGENT_CONFIG (kompatybilność z zero_shot1/2/3)
 # ---------------------------------------------------------------------------
 
+# NOTE: retrieval runs through RAGRetriever in `_RAG_MODE`, which defaults to
+# "bm25" (see above). Vector/hybrid only engage when RAG_MODE=vector|hybrid is
+# exported — which it was NOT during the benchmark runs. Every stored ga3 result
+# therefore used lexical BM25 retrieval, not vector/hybrid.
 AGENT_CONFIG = {
     "name": "uam_ga3",
     "model": model,
-    "system_prompt": "Multi-agent: Decomposer → Retriever (RAG) → Verifier",
-    "tools": ["rag_hybrid", "claim_decomposition"],
+    "system_prompt": "Multi-agent: Decomposer → BM25 Retriever (RAG_MODE default) → Verifier",
+    "tools": ["bm25_wikipedia", "claim_decomposition"],
 }
 
 

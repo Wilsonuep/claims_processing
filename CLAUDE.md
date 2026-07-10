@@ -131,9 +131,16 @@ Full detail in [docs/architecture.md](docs/architecture.md). Key points:
   `_MODEL_CACHE`, `_embed_cache`) to share the 4–6 GB BM25 index and embedding
   model across agents. Never load these twice in one process.
 - **Active roster (6 agents)**: ga1 `single` (zero-shot), ga2 `single_bm25`
-  (BM25), ga3 `rag_claim_decomp` (claim decomp + vector RAG), ga4
+  (BM25), ga3 `rag_claim_decomp` (claim decomp + BM25), ga4
   `bm25_claim_decomp` (claim decomp + BM25), ga5 `fewshot_cot_rag` (few-shot CoT
-  + RAG), ga6 `fewshot_cot_debate_rag` (debate + judge + RAG).
+  + BM25), ga6 `fewshot_cot_debate_rag` (debate + judge + BM25).
+- **Retrieval backend (important):** ga3/ga5/ga6 retrieve through `RAGRetriever`,
+  which reads `RAG_MODE` (`bm25`|`vector`|`hybrid`, **default `bm25`**). `RAG_MODE`
+  was **never set to `vector`/`hybrid`**, so every stored result for these agents
+  used **lexical BM25** — no run ever used vector/embedding retrieval. ga3 is thus
+  a decomposition+BM25 pipeline like ga4 (they differ only in code path:
+  `RAGRetriever` in bm25 mode vs. `BM25Index` directly). Notebook labels and agent
+  `AGENT_CONFIG`s were corrected to reflect this; don't reintroduce "vector RAG".
 - **Discontinued**: the former **uam_ga2** (`single_web.py`, ReAct + DuckDuckGo)
   was misconfigured and removed; archived as `uam_ga_web_tool_arch` in
   `extras/discontinued/single_web.py`. The remaining agents were renumbered down
